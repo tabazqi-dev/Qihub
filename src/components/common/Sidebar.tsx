@@ -188,12 +188,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <div className="relative shrink-0">
               <img
+                key={profile.avatarUrl}
                 src={profile.avatarUrl}
                 alt={profile.name}
                 referrerPolicy="no-referrer"
                 className="w-9 h-9 rounded-full object-cover ring-1 ring-neutral-300 dark:ring-neutral-700"
+                onLoad={(e) => {
+                  e.currentTarget.style.display = '';
+                }}
                 onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
+                  e.currentTarget.style.display = 'none';
                 }}
               />
               <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full absolute bottom-0 right-0 ring-2 ring-white dark:ring-neutral-900" />

@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { buildXlsxBlob } from '../../utils/xlsxExport';
 import {
   ClipboardList,
   Plus,
@@ -7,7 +8,8 @@ import {
   Pencil,
   FileSpreadsheet,
   X,
-  RotateCcw
+  RotateCcw,
+  Calendar
 } from 'lucide-react';
 
 const getLocalToday = () => new Date().toLocaleDateString('en-CA');
@@ -16,6 +18,38 @@ const getLocalYesterday = () => {
   const d = new Date();
   d.setDate(d.getDate() - 1);
   return d.toLocaleDateString('en-CA');
+};
+
+const isoToDmy = (iso: string): string => {
+  if (!iso) return '';
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!match) return iso;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+};
+
+const dmyToIso = (dmy: string): string | null => {
+  const clean = dmy.trim();
+  if (!clean) return '';
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(clean);
+  if (!match) return null;
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  const dt = new Date(year, month - 1, day);
+  if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) {
+    return null;
+  }
+  return `${match[3]}-${match[2]}-${match[1]}`;
+};
+
+const formatDmyInput = (raw: string): string => {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
 };
 
 const formatDisplayDate = (dateStr: string) => {
@@ -34,30 +68,89 @@ export const LogbookView: React.FC = () => {
   const { logbookEntries, addLogbookEntry, updateLogbookEntry, deleteLogbookEntry, showToast } = useApp();
 
   const [date, setDate] = useState(getLocalToday);
+  const [dateInput, setDateInput] = useState(() => isoToDmy(getLocalToday()));
   const [description, setDescription] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Filter period state
+  // Filter period state (ISO YYYY-MM-DD internally + DD/MM/YYYY display)
   const [startDateFilter, setStartDateFilter] = useState('');
+  const [startFilterInput, setStartFilterInput] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
+  const [endFilterInput, setEndFilterInput] = useState('');
+
+  const datePickerRef = useRef<HTMLInputElement>(null);
+  const startPickerRef = useRef<HTMLInputElement>(null);
+  const endPickerRef = useRef<HTMLInputElement>(null);
+
+  const applyFormDateIso = (iso: string) => {
+    setDate(iso);
+    setDateInput(isoToDmy(iso));
+  };
+
+  const handleDateTextChange = (raw: string) => {
+    const formatted = formatDmyInput(raw);
+    setDateInput(formatted);
+    if (formatted.length === 10) {
+      const parsed = dmyToIso(formatted);
+      if (parsed) {
+        setDate(parsed);
+      }
+    }
+  };
+
+  const handleFilterDateTextChange = (kind: 'start' | 'end', raw: string) => {
+    const formatted = formatDmyInput(raw);
+    if (kind === 'start') {
+      setStartFilterInput(formatted);
+      if (!formatted) {
+        setStartDateFilter('');
+      } else if (formatted.length === 10) {
+        const parsed = dmyToIso(formatted);
+        if (parsed) setStartDateFilter(parsed);
+      }
+    } else {
+      setEndFilterInput(formatted);
+      if (!formatted) {
+        setEndDateFilter('');
+      } else if (formatted.length === 10) {
+        const parsed = dmyToIso(formatted);
+        if (parsed) setEndDateFilter(parsed);
+      }
+    }
+  };
+
+  const openNativePicker = (input: HTMLInputElement | null) => {
+    if (!input) return;
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    if (typeof pickerInput.showPicker === 'function') {
+      pickerInput.showPicker();
+    } else {
+      pickerInput.click();
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !description.trim()) {
-      showToast('Tanggal dan catatan pekerjaan harian wajib diisi', 'warning');
+    const resolvedIso = dmyToIso(dateInput);
+    if (!resolvedIso) {
+      showToast('Format tanggal harus DD/MM/YYYY yang valid (contoh: 25/02/2026)', 'warning');
+      return;
+    }
+    if (!description.trim()) {
+      showToast('Catatan pekerjaan harian wajib diisi', 'warning');
       return;
     }
 
     if (editingId) {
       updateLogbookEntry(editingId, {
-        date,
+        date: resolvedIso,
         description: description.trim()
       });
       showToast('Catatan logbook berhasil diperbarui!', 'success');
       setEditingId(null);
     } else {
       addLogbookEntry({
-        date,
+        date: resolvedIso,
         project: 'Daily Log',
         hours: 0,
         category: 'Daily',
@@ -67,18 +160,18 @@ export const LogbookView: React.FC = () => {
     }
 
     setDescription('');
-    setDate(getLocalToday());
+    applyFormDateIso(getLocalToday());
   };
 
   const handleStartEdit = (id: string, currentDate: string, currentDesc: string) => {
     setEditingId(id);
-    setDate(currentDate);
+    applyFormDateIso(currentDate);
     setDescription(currentDesc);
   };
 
   const handleCancelEdit = () => {
     setEditingId(null);
-    setDate(getLocalToday());
+    applyFormDateIso(getLocalToday());
     setDescription('');
   };
 
@@ -92,28 +185,33 @@ export const LogbookView: React.FC = () => {
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [logbookEntries, startDateFilter, endDateFilter]);
 
-  // Export to XLSX (Excel compatible TSV)
+  // Export genuine XLSX with clean separated columns: No | Tanggal | Detail Kerjaan
   const handleExportXLSX = () => {
     const orderedForExport = [...filteredEntries].sort((a, b) => a.date.localeCompare(b.date));
-    const headers = ['No', 'Tanggal', 'Pekerjaan / Aktivitas Harian'];
-    const rows = orderedForExport.map((e, idx) => [
+    const columns = [
+      { header: 'No', width: 8 },
+      { header: 'Tanggal', width: 18 },
+      { header: 'Detail Kerjaan', width: 72 },
+    ];
+    const rows: (string | number)[][] = orderedForExport.map((e, idx) => [
       idx + 1,
-      e.date,
-      `"${e.description.replace(/"/g, '""')}"`
+      isoToDmy(e.date),
+      e.description,
     ]);
 
-    const csvContent = '\uFEFF' + [headers.join('\t'), ...rows.map(r => r.join('\t'))].join('\n');
-    const blob = new Blob([csvContent], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const blob = buildXlsxBlob('Logbook Harian', columns, rows);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `Logbook_Harian_${startDateFilter || 'semua'}_sd_${endDateFilter || 'sekarang'}.xls`);
+    const startLabel = startDateFilter ? isoToDmy(startDateFilter).replace(/\//g, '-') : 'semua';
+    const endLabel = endDateFilter ? isoToDmy(endDateFilter).replace(/\//g, '-') : 'sekarang';
+    link.setAttribute('download', `Logbook_Harian_${startLabel}_sd_${endLabel}.xlsx`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    showToast('Logbook berhasil diekspor ke format Excel (.xls / .xlsx)!', 'success');
+    showToast('Logbook berhasil diekspor ke file Excel (.xlsx) dengan kolom terpisah!', 'success');
   };
 
   return (
@@ -129,7 +227,7 @@ export const LogbookView: React.FC = () => {
               Logbook Kerja Harian
             </h2>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              Catat apa saja yang Anda kerjakan setiap hari dan ekspor rekap periode ke Excel.
+              Catat apa saja yang Anda kerjakan setiap hari dan ekspor rekap periode ke Excel (.xlsx).
             </p>
           </div>
         </div>
@@ -166,12 +264,12 @@ export const LogbookView: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
-                  Tanggal
+                  Tanggal (DD/MM/YYYY)
                 </label>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setDate(getLocalToday())}
+                    onClick={() => applyFormDateIso(getLocalToday())}
                     className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
                       date === getLocalToday()
                         ? 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300'
@@ -182,7 +280,7 @@ export const LogbookView: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDate(getLocalYesterday())}
+                    onClick={() => applyFormDateIso(getLocalYesterday())}
                     className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
                       date === getLocalYesterday()
                         ? 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300'
@@ -193,13 +291,37 @@ export const LogbookView: React.FC = () => {
                   </button>
                 </div>
               </div>
-              <input
-                type="date"
-                required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100"
-              />
+              <div className="relative flex items-center">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  required
+                  maxLength={10}
+                  placeholder="DD/MM/YYYY"
+                  value={dateInput}
+                  onChange={(e) => handleDateTextChange(e.target.value)}
+                  className="w-full pl-3.5 pr-10 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => openNativePicker(datePickerRef.current)}
+                  className="absolute right-2.5 p-1 rounded-lg text-neutral-400 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
+                  title="Pilih dari kalender"
+                >
+                  <Calendar className="w-4 h-4" />
+                </button>
+                <input
+                  ref={datePickerRef}
+                  type="date"
+                  value={date}
+                  onChange={(e) => {
+                    if (e.target.value) applyFormDateIso(e.target.value);
+                  }}
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  className="sr-only"
+                />
+              </div>
             </div>
 
             <div>
@@ -233,30 +355,82 @@ export const LogbookView: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <div className="flex items-center gap-1.5">
                 <span className="text-neutral-400">Dari:</span>
-                <input
-                  type="date"
-                  value={startDateFilter}
-                  onChange={(e) => setStartDateFilter(e.target.value)}
-                  className="px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100"
-                />
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={10}
+                    placeholder="DD/MM/YYYY"
+                    value={startFilterInput}
+                    onChange={(e) => handleFilterDateTextChange('start', e.target.value)}
+                    className="w-32 pl-2.5 pr-7 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openNativePicker(startPickerRef.current)}
+                    className="absolute right-1.5 p-0.5 text-neutral-400 hover:text-indigo-600 cursor-pointer"
+                    title="Pilih tanggal mulai"
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                  </button>
+                  <input
+                    ref={startPickerRef}
+                    type="date"
+                    value={startDateFilter}
+                    onChange={(e) => {
+                      setStartDateFilter(e.target.value);
+                      setStartFilterInput(isoToDmy(e.target.value));
+                    }}
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    className="sr-only"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-1.5">
                 <span className="text-neutral-400">s/d:</span>
-                <input
-                  type="date"
-                  value={endDateFilter}
-                  onChange={(e) => setEndDateFilter(e.target.value)}
-                  className="px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100"
-                />
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={10}
+                    placeholder="DD/MM/YYYY"
+                    value={endFilterInput}
+                    onChange={(e) => handleFilterDateTextChange('end', e.target.value)}
+                    className="w-32 pl-2.5 pr-7 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openNativePicker(endPickerRef.current)}
+                    className="absolute right-1.5 p-0.5 text-neutral-400 hover:text-indigo-600 cursor-pointer"
+                    title="Pilih tanggal akhir"
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                  </button>
+                  <input
+                    ref={endPickerRef}
+                    type="date"
+                    value={endDateFilter}
+                    onChange={(e) => {
+                      setEndDateFilter(e.target.value);
+                      setEndFilterInput(isoToDmy(e.target.value));
+                    }}
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    className="sr-only"
+                  />
+                </div>
               </div>
 
-              {(startDateFilter || endDateFilter) && (
+              {(startDateFilter || endDateFilter || startFilterInput || endFilterInput) && (
                 <button
                   type="button"
                   onClick={() => {
                     setStartDateFilter('');
+                    setStartFilterInput('');
                     setEndDateFilter('');
+                    setEndFilterInput('');
                   }}
                   className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
                   title="Reset filter periode"
@@ -302,7 +476,7 @@ export const LogbookView: React.FC = () => {
                     <div className="space-y-2 min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-mono">
-                          {item.date}
+                          {isoToDmy(item.date)}
                         </span>
                         <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
                           {formatDisplayDate(item.date)}

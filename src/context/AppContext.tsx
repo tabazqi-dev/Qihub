@@ -7,6 +7,7 @@ import {
   signOut
 } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
+import { isContraVoidTransaction } from '../utils/accounting';
 import {
   NavigationTab,
   TodoItem,
@@ -1172,10 +1173,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateAccount = (id: string, updates: Partial<FinancialAccount>) => {
-    setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
-    const { createdAt: _c, ...restUpdates } = updates;
-    void cloudUpdateDoc('accounts', id, restUpdates as Record<string, unknown>);
-    showToast('Data akun diperbarui', 'info');
+    const normalizedUpdates: Partial<FinancialAccount> = {
+      ...updates,
+      ...('accountNumber' in updates ? { accountNumber: updates.accountNumber?.trim() || undefined } : {}),
+      ...('notes' in updates ? { notes: updates.notes?.trim() || undefined } : {}),
+    };
+    setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...normalizedUpdates } : a));
+    const { createdAt: _c, ...restUpdates } = normalizedUpdates;
+    const cloudPayload: Record<string, unknown> = {
+      ...restUpdates,
+      ...('accountNumber' in updates ? { accountNumber: updates.accountNumber?.trim() || '' } : {}),
+      ...('notes' in updates ? { notes: updates.notes?.trim() || '' } : {}),
+    };
+    void cloudUpdateDoc('accounts', id, cloudPayload);
+    showToast('Data akun diperbarui', 'success');
   };
 
   const deleteAccount = (id: string) => {
@@ -1461,36 +1472,85 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Transaksi diperbarui', 'info');
   };
 
-  // Void Transaction (Audit-safe cancellation preserving history)
+  // Void Transaction (Audit-safe cancellation creating a contra reversal transaction)
   const voidTransaction = (id: string, reason?: string) => {
     const target = transactions.find(t => t.id === id);
-    if (!target || target.isVoided) return;
+    if (!target || target.isVoided || isContraVoidTransaction(target)) return;
 
     const voidedAt = new Date().toISOString();
-    const voidReason = (reason?.trim() || 'Dibatalkan (Void) oleh pengguna').slice(0, 300);
+    const cleanReason = (reason?.trim() || 'Dibatalkan (Void) oleh pengguna').slice(0, 240);
 
-    const idsToVoid = target.transferId
-      ? transactions.filter(t => t.transferId === target.transferId && !t.isVoided).map(t => t.id)
-      : [id];
+    const targetsToVoid = target.transferId
+      ? transactions.filter(
+          t => t.transferId === target.transferId && !t.isVoided && !isContraVoidTransaction(t)
+        )
+      : [target];
 
-    setTransactions(prev => prev.map(t => (
-      idsToVoid.includes(t.id)
-        ? { ...t, isVoided: true, voidedAt, voidReason }
-        : t
-    )));
+    if (targetsToVoid.length === 0) return;
 
-    idsToVoid.forEach(txId => {
-      void cloudUpdateDoc('transactions', txId, {
+    const baseTs = Date.now();
+    const contraTxs: FinanceTransaction[] = [];
+    const voidMetaById: Record<string, { contraId: string; voidReason: string }> = {};
+
+    targetsToVoid.forEach((orig, idx) => {
+      const contraId = `tx-void-${baseTs}${idx > 0 ? `-${idx}` : ''}`;
+      const contraTx: FinanceTransaction = {
+        id: contraId,
+        type: orig.type === 'income' ? 'expense' : 'income',
+        title: `[VOID] ${orig.title}`.slice(0, 200),
+        amount: orig.amount,
+        category: orig.category,
+        date: orig.date,
+        paymentMethod: orig.paymentMethod,
+        walletType: orig.walletType,
+        accountId: orig.accountId,
+        accountName: orig.accountName,
+        transferId: orig.transferId ? `void-${orig.transferId}` : undefined,
+        transferType: orig.transferType,
+        targetAccountId: orig.targetAccountId,
+        targetAccountName: orig.targetAccountName,
+        isAdjustment: orig.isAdjustment,
+        coaCode: orig.coaCode,
+        coaName: orig.coaName,
+        debitAccountCode: orig.creditAccountCode,
+        debitAccountName: orig.creditAccountName,
+        creditAccountCode: orig.debitAccountCode,
+        creditAccountName: orig.debitAccountName,
+        isVoided: false,
+        notes: `Transaksi lawan (Void) dari "${orig.title}"${cleanReason ? ` — Alasan: ${cleanReason}` : ''}`.slice(0, 950),
+      };
+      contraTxs.push(contraTx);
+      voidMetaById[orig.id] = {
+        contraId,
+        voidReason: `[CONTRA:${contraId}] ${cleanReason}`.slice(0, 300),
+      };
+    });
+
+    setTransactions(prev => [
+      ...contraTxs,
+      ...prev.map(t => {
+        const meta = voidMetaById[t.id];
+        return meta ? { ...t, isVoided: true, voidedAt, voidReason: meta.voidReason } : t;
+      }),
+    ]);
+
+    targetsToVoid.forEach(orig => {
+      const meta = voidMetaById[orig.id];
+      void cloudUpdateDoc('transactions', orig.id, {
         isVoided: true,
         voidedAt,
-        voidReason
+        voidReason: meta.voidReason,
       });
     });
 
+    contraTxs.forEach(contra => {
+      void cloudWriteDoc('transactions', contra.id, contra as unknown as Record<string, unknown>);
+    });
+
     showToast(
-      idsToVoid.length > 1
-        ? `Transaksi transfer (${idsToVoid.length} entri) telah di-VOID. Saldo & jurnal diperbarui.`
-        : `Transaksi "${target.title}" telah di-VOID. Saldo & laporan diperbarui.`,
+      targetsToVoid.length > 1
+        ? `Transaksi transfer (${targetsToVoid.length} entri) di-VOID & dibuatkan ${contraTxs.length} transaksi lawannya.`
+        : `Transaksi "${target.title}" di-VOID & transaksi lawannya berhasil dibuat.`,
       'warning'
     );
   };

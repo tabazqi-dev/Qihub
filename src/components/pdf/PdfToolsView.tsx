@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useApp } from '../../context/AppContext';
@@ -26,9 +26,6 @@ import {
   Check,
   Eye,
   Sliders,
-  Calendar,
-  UserCheck,
-  MapPin,
   ChevronRight,
   Layers,
   Info,
@@ -102,9 +99,6 @@ export const PdfToolsView: React.FC = () => {
   const [sigCoordY, setSigCoordY] = useState<number>(80); // percentage 0-100 of page height
   const [sigScale, setSigScale] = useState<number>(45); // width in mm approx (relative to 210mm A4)
   const [sigAspectRatio, setSigAspectRatio] = useState<number>(520 / 160);
-  const [includeDateStamp, setIncludeDateStamp] = useState<boolean>(true);
-  const [includeNameStamp, setIncludeNameStamp] = useState<boolean>(true);
-  const [signerLocation, setSignerLocation] = useState<string>('Jakarta, Indonesia');
   const [isSigning, setIsSigning] = useState<boolean>(false);
   const [signedResultUrl, setSignedResultUrl] = useState<string | null>(null);
   const [isRenderingPreview, setIsRenderingPreview] = useState<boolean>(false);
@@ -464,43 +458,13 @@ export const PdfToolsView: React.FC = () => {
       x = Math.min(Math.max(4, x), Math.max(4, pageWidth - drawWidth - 4));
       y = Math.min(Math.max(18, y), Math.max(18, pageHeight - drawHeight - 4));
 
-      // Draw signature image
+      // Draw signature image only (no name or digital date text below)
       page.drawImage(embeddedImage, {
         x,
         y,
         width: drawWidth,
         height: drawHeight,
       });
-
-      // Draw optional text stamp (Signer name, Date, Location)
-      if (includeNameStamp || includeDateStamp) {
-        const todayStr = new Date().toLocaleDateString('id-ID', {
-          day: '2-digit',
-          month: 'long',
-          year: 'numeric'
-        });
-
-        let textY = y - 10;
-
-        if (includeNameStamp) {
-          page.drawText(`(${typedName || profile.name})`, {
-            x: Math.max(8, x + (drawWidth / 2) - 40),
-            y: textY,
-            size: 9,
-            color: rgb(0.1, 0.15, 0.2),
-          });
-          textY -= 11;
-        }
-
-        if (includeDateStamp) {
-          page.drawText(`Ditandatangani secara digital pada ${todayStr} • ${signerLocation}`, {
-            x: Math.max(8, x + (drawWidth / 2) - 75),
-            y: textY,
-            size: 7,
-            color: rgb(0.4, 0.45, 0.5),
-          });
-        }
-      }
 
       // Save modified PDF
       const pdfBytes = await pdfDoc.save();
@@ -1827,11 +1791,6 @@ export const PdfToolsView: React.FC = () => {
                           draggable={false}
                           className="w-full h-auto pointer-events-none select-none"
                         />
-                        {includeNameStamp && (
-                          <span className="text-[8px] leading-tight text-neutral-800 font-semibold truncate max-w-full pointer-events-none">
-                            ({typedName || profile.name})
-                          </span>
-                        )}
                       </div>
                     ) : (
                       <div className="absolute bottom-3 inset-x-3 py-1.5 px-2.5 rounded-lg bg-neutral-900/80 text-white text-[11px] text-center pointer-events-none">
@@ -1917,44 +1876,6 @@ export const PdfToolsView: React.FC = () => {
                   onChange={(e) => setSigScale(Number(e.target.value))}
                   className="w-full accent-indigo-600 cursor-pointer"
                 />
-              </div>
-
-              {/* Optional Stamps */}
-              <div className="space-y-2 pt-2 border-t border-neutral-200 dark:border-neutral-800 text-xs">
-                <label className="flex items-center gap-2 text-neutral-700 dark:text-neutral-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeNameStamp}
-                    onChange={(e) => setIncludeNameStamp(e.target.checked)}
-                    className="rounded accent-indigo-600"
-                  />
-                  <span>Sertakan Nama Penandatangan di bawah paraf</span>
-                </label>
-
-                <label className="flex items-center gap-2 text-neutral-700 dark:text-neutral-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeDateStamp}
-                    onChange={(e) => setIncludeDateStamp(e.target.checked)}
-                    className="rounded accent-indigo-600"
-                  />
-                  <span>Sertakan Stempel Tanggal Digital Resmi</span>
-                </label>
-
-                {includeDateStamp && (
-                  <div className="pt-1">
-                    <label className="block text-[11px] text-neutral-400 mb-1">
-                      Lokasi Kota Tanda Tangan:
-                    </label>
-                    <input
-                      type="text"
-                      value={signerLocation}
-                      onChange={(e) => setSignerLocation(e.target.value)}
-                      placeholder="Jakarta, Indonesia"
-                      className="w-full px-3 py-1.5 rounded-lg bg-neutral-50 dark:bg-neutral-800 border text-xs"
-                    />
-                  </div>
-                )}
               </div>
 
               {/* Stamping Trigger */}

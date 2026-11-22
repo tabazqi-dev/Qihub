@@ -24,7 +24,13 @@ import {
   ArrowLeftRight,
   Ban
 } from 'lucide-react';
-import { getCoaForFinancialAccount, getCoaForCategory } from '../../utils/accounting';
+import {
+  getCoaForFinancialAccount,
+  getCoaForCategory,
+  isTransactionIncludedInLedger,
+  isContraVoidTransaction,
+  formatVoidReason
+} from '../../utils/accounting';
 
 interface AccountLedgerViewProps {
   account: FinancialAccount;
@@ -83,7 +89,7 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
 
     const computed = chronological.map((tx, idx) => {
       const isIncome = tx.type === 'income';
-      if (!tx.isVoided) {
+      if (isTransactionIncludedInLedger(tx)) {
         if (isIncome) {
           running += tx.amount;
           inSum += tx.amount;
@@ -236,7 +242,7 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer transition-colors"
             >
               <Edit2 className="w-3.5 h-3.5" />
-              <span>Edit Saldo Awal</span>
+              <span>Edit Akun & No. Rek</span>
             </button>
 
             <button
@@ -380,28 +386,37 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
               <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60 font-mono">
                 {filteredMutations.map((m) => {
                   const isIncome = m.type === 'income';
+                  const isContra = isContraVoidTransaction(m);
+                  const cleanVoidReason = formatVoidReason(m.voidReason);
 
                   return (
                     <tr 
                       key={m.id}
-                      className={`hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40 transition-colors ${m.isVoided ? 'opacity-50' : ''}`}
+                      className={`hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40 transition-colors ${
+                        m.isVoided ? 'opacity-75' : isContra ? 'bg-amber-50/35 dark:bg-amber-950/15' : ''
+                      }`}
                     >
                       <td className="py-3 px-3 text-neutral-500 whitespace-nowrap">
                         {m.date}
                       </td>
 
                       <td className="py-3 px-3 font-sans">
-                        <div className={`font-semibold flex items-center gap-1.5 ${m.isVoided ? 'line-through text-neutral-400' : 'text-neutral-900 dark:text-neutral-100'}`}>
+                        <div className="font-semibold flex flex-wrap items-center gap-1.5 text-neutral-900 dark:text-neutral-100">
                           <span>{m.title}</span>
                           {m.isVoided && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 text-[9px] font-mono font-bold no-underline">
-                              VOID
+                            <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 text-[9px] font-mono font-bold">
+                              DI-VOID
+                            </span>
+                          )}
+                          {isContra && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[9px] font-mono font-bold">
+                              LAWAN VOID
                             </span>
                           )}
                         </div>
-                        {m.notes && (
+                        {(cleanVoidReason || m.notes) && (
                           <div className="text-[11px] text-neutral-400 font-sans line-clamp-1">
-                            {m.voidReason ? `Void: ${m.voidReason}` : m.notes}
+                            {cleanVoidReason ? `Void: ${cleanVoidReason}` : m.notes}
                           </div>
                         )}
                       </td>
@@ -419,11 +434,11 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
                         <span>{m.contraCoaName}</span>
                       </td>
 
-                      <td className={`py-3 px-3 text-right font-bold whitespace-nowrap ${m.isVoided ? 'line-through text-neutral-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                      <td className="py-3 px-3 text-right font-bold whitespace-nowrap text-emerald-600 dark:text-emerald-400">
                         {isIncome ? `+${currencySymbol} ${m.amount.toLocaleString('id-ID')}` : '-'}
                       </td>
 
-                      <td className={`py-3 px-3 text-right font-bold whitespace-nowrap ${m.isVoided ? 'line-through text-neutral-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                      <td className="py-3 px-3 text-right font-bold whitespace-nowrap text-rose-600 dark:text-rose-400">
                         {!isIncome ? `-${currencySymbol} ${m.amount.toLocaleString('id-ID')}` : '-'}
                       </td>
 
@@ -433,11 +448,11 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
 
                       <td className="py-3 px-3 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          {!m.isVoided && onVoidTransaction && (
+                          {!m.isVoided && !isContra && onVoidTransaction && (
                             <button
                               onClick={() => onVoidTransaction(m.id)}
                               className="p-1 rounded text-neutral-400 hover:text-amber-500 cursor-pointer transition-colors"
-                              title="Void Transaksi"
+                              title="Void Transaksi (Buat Lawannya)"
                             >
                               <Ban className="w-3.5 h-3.5" />
                             </button>

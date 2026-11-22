@@ -17,7 +17,10 @@ import {
   getCoaForCategory,
   generateStandardJournalEntries,
   calculateCoaLedgers,
-  getAccountingEquationSummary
+  getAccountingEquationSummary,
+  isTransactionIncludedInLedger,
+  isContraVoidTransaction,
+  formatVoidReason
 } from '../../utils/accounting';
 import {
   Wallet,
@@ -73,8 +76,8 @@ export const FinanceTrackerView: React.FC = () => {
   const {
     accounts,
     addAccount,
+    updateAccount,
     deleteAccount,
-    updateInitialBalance,
     importAccountsFromCSV,
     transactions,
     addTransaction,
@@ -103,7 +106,7 @@ export const FinanceTrackerView: React.FC = () => {
   // Filter for transactions
   const [typeFilter, setTypeFilter] = useState<'all' | 'expense' | 'income'>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
-  const [showVoidedTx, setShowVoidedTx] = useState(false);
+  const [showVoidedTx, setShowVoidedTx] = useState(true);
 
   // Void Modal State
   const [voidingTx, setVoidingTx] = useState<FinanceTransaction | null>(null);
@@ -142,9 +145,12 @@ export const FinanceTrackerView: React.FC = () => {
   const [isUploadBalanceOpen, setIsUploadBalanceOpen] = useState(false);
   const [csvUploadText, setCsvUploadText] = useState('');
 
-  // Quick Edit Initial Balance Modal
+  // Edit Account & Initial Balance Modal
   const [editingAcc, setEditingAcc] = useState<FinancialAccount | null>(null);
+  const [editAccNameInput, setEditAccNameInput] = useState('');
+  const [editAccNumberInput, setEditAccNumberInput] = useState('');
   const [editBalanceInput, setEditBalanceInput] = useState('');
+  const [editAccNotesInput, setEditAccNotesInput] = useState('');
 
   // ================= MY DEBTS (HUTANG SAYA) MODAL STATE =================
   const [isAddingMyDebt, setIsAddingMyDebt] = useState(false);
@@ -220,15 +226,19 @@ export const FinanceTrackerView: React.FC = () => {
 
   // ================= ACCOUNT LEDGER / MUTASI STATE =================
   const [selectedAccountForLedger, setSelectedAccountForLedger] = useState<FinancialAccount | null>(null);
+  const activeLedgerAccount = useMemo(
+    () => (selectedAccountForLedger ? accounts.find(a => a.id === selectedAccountForLedger.id) || selectedAccountForLedger : null),
+    [accounts, selectedAccountForLedger]
+  );
 
   // ================= TRANSFER & TARIK TUNAI MODAL STATE =================
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [transferInitialSourceId, setTransferInitialSourceId] = useState<string | undefined>(undefined);
   const [transferInitialType, setTransferInitialType] = useState<TransferType>('cash_withdrawal');
 
-  // =================== CALCULATIONS (EXCLUDING VOIDED) ===================
+  // =================== CALCULATIONS (WITH CONTRA VOID REVERSALS) ===================
   const activeTransactions = useMemo(
-    () => transactions.filter(t => !t.isVoided),
+    () => transactions.filter(isTransactionIncludedInLedger),
     [transactions]
   );
 
@@ -302,21 +312,28 @@ export const FinanceTrackerView: React.FC = () => {
   }, [activeTransactions, selectedMonth]);
 
   const monthlyTransactions = activeTransactions.filter(t => t.date.startsWith(selectedMonth));
-  const monthlyIncome = monthlyTransactions
-    .filter(t => t.type === 'income')
-    .reduce((s, t) => s + t.amount, 0);
-  const monthlyExpense = monthlyTransactions
-    .filter(t => t.type === 'expense')
-    .reduce((s, t) => s + t.amount, 0);
-  const monthlyProfitLoss = monthlyIncome - monthlyExpense;
-
-  // Monthly Expenses by Category
+  let monthlyIncome = 0;
+  let monthlyExpense = 0;
   const monthlyCategoryExpenses: Record<string, number> = {};
-  monthlyTransactions
-    .filter(t => t.type === 'expense')
-    .forEach(t => {
+
+  monthlyTransactions.forEach(t => {
+    if (isContraVoidTransaction(t)) {
+      if (t.type === 'income') {
+        monthlyExpense -= t.amount;
+        monthlyCategoryExpenses[t.category] = Math.max(0, (monthlyCategoryExpenses[t.category] || 0) - t.amount);
+      } else {
+        monthlyIncome -= t.amount;
+      }
+    } else if (t.type === 'income') {
+      monthlyIncome += t.amount;
+    } else {
+      monthlyExpense += t.amount;
       monthlyCategoryExpenses[t.category] = (monthlyCategoryExpenses[t.category] || 0) + t.amount;
-    });
+    }
+  });
+  monthlyIncome = Math.max(0, monthlyIncome);
+  monthlyExpense = Math.max(0, monthlyExpense);
+  const monthlyProfitLoss = monthlyIncome - monthlyExpense;
 
   // 6. Chart of Accounts & General Journal Calculations
   const allCoaList = useMemo(() => getAllChartOfAccounts(accounts), [accounts]);
@@ -337,7 +354,7 @@ export const FinanceTrackerView: React.FC = () => {
   const filteredTransactions = [...transactions]
     .sort((a, b) => b.date.localeCompare(a.date))
     .filter(t => {
-      if (!showVoidedTx && t.isVoided) return false;
+      if (!showVoidedTx && (t.isVoided || isContraVoidTransaction(t))) return false;
       if (typeFilter !== 'all' && t.type !== typeFilter) return false;
       if (accountFilter !== 'all' && t.accountId !== accountFilter && t.accountName !== accountFilter) return false;
       return true;
@@ -442,14 +459,30 @@ export const FinanceTrackerView: React.FC = () => {
     setIsAddingAccount(false);
   };
 
-  // 3. Quick Update Initial Balance
+  // 3. Open & Update Account Details (Name, Account Number, Initial Balance, Notes)
+  const openEditAccountModal = (acc: FinancialAccount) => {
+    setEditingAcc(acc);
+    setEditAccNameInput(acc.name);
+    setEditAccNumberInput(acc.accountNumber || '');
+    setEditBalanceInput(acc.initialBalance.toLocaleString('id-ID'));
+    setEditAccNotesInput(acc.notes || '');
+  };
+
   const handleUpdateBalanceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAcc) return;
     const parsed = parseCurrencyInput(editBalanceInput);
-    updateInitialBalance(editingAcc.id, parsed);
+    updateAccount(editingAcc.id, {
+      name: editAccNameInput.trim() || editingAcc.name,
+      accountNumber: editAccNumberInput.trim(),
+      initialBalance: parsed,
+      notes: editAccNotesInput.trim(),
+    });
     setEditingAcc(null);
+    setEditAccNameInput('');
+    setEditAccNumberInput('');
     setEditBalanceInput('');
+    setEditAccNotesInput('');
   };
 
   // 3B. COA Adjustment Submit
@@ -1079,13 +1112,17 @@ export const FinanceTrackerView: React.FC = () => {
                 {filteredTransactions.map((tx) => {
                   const isIncome = tx.type === 'income';
                   const isVoided = Boolean(tx.isVoided);
+                  const isContra = isContraVoidTransaction(tx);
+                  const cleanVoidReason = formatVoidReason(tx.voidReason);
 
                   return (
                     <div
                       key={tx.id}
                       className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3.5 rounded-xl border transition-colors ${
                         isVoided
-                          ? 'bg-neutral-100/70 dark:bg-neutral-800/20 border-neutral-200/70 dark:border-neutral-800/70 opacity-65'
+                          ? 'bg-neutral-100/70 dark:bg-neutral-800/20 border-neutral-200/70 dark:border-neutral-800/70 opacity-75'
+                          : isContra
+                          ? 'bg-amber-50/40 dark:bg-amber-950/15 border-amber-200/70 dark:border-amber-900/50'
                           : 'bg-neutral-50 dark:bg-neutral-800/40 border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
                       }`}
                     >
@@ -1093,6 +1130,8 @@ export const FinanceTrackerView: React.FC = () => {
                         <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                           isVoided
                             ? 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400'
+                            : isContra
+                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                             : isIncome
                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                             : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
@@ -1103,13 +1142,18 @@ export const FinanceTrackerView: React.FC = () => {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <p className={`text-xs font-semibold truncate ${
-                              isVoided ? 'line-through text-neutral-400' : 'text-neutral-900 dark:text-neutral-100'
+                              isVoided ? 'text-neutral-500 dark:text-neutral-400' : 'text-neutral-900 dark:text-neutral-100'
                             }`}>
                               {tx.title}
                             </p>
                             {isVoided && (
                               <span className="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase font-mono bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
-                                VOID
+                                DI-VOID
+                              </span>
+                            )}
+                            {isContra && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase font-mono bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
+                                LAWAN VOID
                               </span>
                             )}
                             {tx.isAdjustment && tx.coaCode && (
@@ -1127,9 +1171,14 @@ export const FinanceTrackerView: React.FC = () => {
                             <span>•</span>
                             <span className="font-mono">{tx.date}</span>
                           </div>
-                          {isVoided && tx.voidReason && (
+                          {isVoided && cleanVoidReason && (
                             <p className="text-[10px] text-rose-500 mt-0.5 truncate">
-                              Alasan Void: {tx.voidReason}
+                              Alasan Void: {cleanVoidReason}
+                            </p>
+                          )}
+                          {isContra && tx.notes && (
+                            <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5 truncate">
+                              {tx.notes}
                             </p>
                           )}
                         </div>
@@ -1137,9 +1186,7 @@ export const FinanceTrackerView: React.FC = () => {
 
                       <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 shrink-0 pl-12 sm:pl-0">
                         <span className={`text-xs font-bold font-mono tabular-nums ${
-                          isVoided
-                            ? 'line-through text-neutral-400'
-                            : isIncome
+                          isIncome
                             ? 'text-emerald-600 dark:text-emerald-400'
                             : 'text-neutral-900 dark:text-neutral-100'
                         }`}>
@@ -1147,14 +1194,14 @@ export const FinanceTrackerView: React.FC = () => {
                         </span>
 
                         <div className="flex items-center gap-1">
-                          {!isVoided && (
+                          {!isVoided && !isContra && (
                             <button
                               onClick={() => {
                                 setVoidingTx(tx);
                                 setVoidReasonInput('');
                               }}
                               className="px-2 py-1 rounded-lg text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 flex items-center gap-1 cursor-pointer"
-                              title="Void / Batalkan Transaksi (Tetap tercatat sebagai riwayat)"
+                              title="Void / Buat Transaksi Lawannya (Tetap tercatat sebagai riwayat)"
                             >
                               <Ban className="w-3.5 h-3.5" />
                               <span className="hidden md:inline">Void</span>
@@ -1182,9 +1229,9 @@ export const FinanceTrackerView: React.FC = () => {
       {/* SUBTAB 2: KELOLA AKUN & SALDO AWAL (REQUESTED)             */}
       {/* ========================================================= */}
       {activeSubTab === 'accounts' && (
-        selectedAccountForLedger ? (
+        activeLedgerAccount ? (
           <AccountLedgerView
-            account={selectedAccountForLedger}
+            account={activeLedgerAccount}
             allAccounts={accounts}
             allTransactions={transactions}
             allCoaList={allCoaList}
@@ -1195,10 +1242,7 @@ export const FinanceTrackerView: React.FC = () => {
               setTxAccountId(accId);
               setIsAddingTx(true);
             }}
-            onEditInitialBalance={(acc) => {
-              setEditingAcc(acc);
-              setEditBalanceInput(acc.initialBalance.toLocaleString('id-ID'));
-            }}
+            onEditInitialBalance={openEditAccountModal}
             onDeleteTransaction={deleteTransaction}
             onVoidTransaction={(id) => {
               const found = transactions.find(t => t.id === id);
@@ -1326,12 +1370,9 @@ export const FinanceTrackerView: React.FC = () => {
 
                               <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                                 <button
-                                  onClick={() => {
-                                    setEditingAcc(acc);
-                                    setEditBalanceInput(acc.initialBalance.toLocaleString('id-ID'));
-                                  }}
+                                  onClick={() => openEditAccountModal(acc)}
                                   className="p-1 rounded text-neutral-400 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
-                                  title="Ubah Saldo Awal"
+                                  title="Edit Akun, No. Rekening & Saldo Awal"
                                 >
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </button>
@@ -2139,19 +2180,59 @@ export const FinanceTrackerView: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: EDIT SALDO AWAL AKUN                              */}
+      {/* MODAL: EDIT AKUN BANK / DOMPET, NO REK & SALDO AWAL       */}
       {/* ========================================================= */}
       {editingAcc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-sm bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
-            <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
-              Ubah Saldo Awal: {editingAcc.name}
-            </h3>
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-neutral-200 dark:border-neutral-800">
+              <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                Edit Data Akun: {editingAcc.name}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingAcc(null)}
+                className="text-neutral-400 hover:text-neutral-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            <form onSubmit={handleUpdateBalanceSubmit} className="space-y-3">
+            <form onSubmit={handleUpdateBalanceSubmit} className="space-y-3 text-xs">
               <div>
-                <label className="block text-xs font-semibold text-neutral-500 mb-1">
-                  Saldo Awal Baru (Rp)
+                <label className="block font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
+                  Nama Akun
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editAccNameInput}
+                  onChange={(e) => setEditAccNameInput(e.target.value)}
+                  placeholder="Contoh: Bank BCA Utama"
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-900 dark:text-neutral-100"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
+                  {editingAcc.type === 'bank'
+                    ? 'No. Rekening Bank'
+                    : editingAcc.type === 'ewallet'
+                    ? 'No. HP / ID Dompet Digital'
+                    : 'Nomor Identitas Kas (Opsional)'}
+                </label>
+                <input
+                  type="text"
+                  value={editAccNumberInput}
+                  onChange={(e) => setEditAccNumberInput(e.target.value)}
+                  placeholder={editingAcc.type === 'bank' ? 'Contoh: 873-049-2189' : 'Contoh: 0812-xxxx-xxxx'}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
+                  Saldo Awal (Rp)
                 </label>
                 <div className="relative flex items-center">
                   <span className="absolute left-3 text-xs font-mono text-neutral-400">Rp</span>
@@ -2161,22 +2242,35 @@ export const FinanceTrackerView: React.FC = () => {
                     required
                     value={editBalanceInput}
                     onChange={(e) => setEditBalanceInput(formatCurrencyInput(e.target.value))}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-sm font-mono font-bold"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm font-mono font-bold text-neutral-900 dark:text-neutral-100"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
+                  Catatan (Opsional)
+                </label>
+                <input
+                  type="text"
+                  value={editAccNotesInput}
+                  onChange={(e) => setEditAccNotesInput(e.target.value)}
+                  placeholder="Keterangan singkat rekening / akun"
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100"
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingAcc(null)}
-                  className="px-3 py-1.5 text-xs rounded-xl border"
+                  className="px-3 py-1.5 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 text-xs rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-semibold"
+                  className="px-4 py-1.5 text-xs rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-semibold cursor-pointer"
                 >
                   Simpan Perubahan
                 </button>
@@ -2360,8 +2454,8 @@ export const FinanceTrackerView: React.FC = () => {
               <p className="font-mono">
                 {voidingTx.type === 'income' ? '+' : '-'} Rp {voidingTx.amount.toLocaleString('id-ID')} ({voidingTx.date})
               </p>
-              <p className="text-[11px] opacity-85 pt-1">
-                Transaksi tetap tersimpan sebagai jejak audit berlabel <strong>VOID</strong>, tetapi nilainya tidak dihitung dalam saldo akun, Neraca, dan P&L.
+              <p className="text-[11px] opacity-90 pt-1">
+                Transaksi asli tetap tersimpan utuh dan sistem akan membuatkan <strong>transaksi lawannya ([VOID])</strong> dengan nominal terbalik ({voidingTx.type === 'income' ? 'Pengeluaran' : 'Pemasukan'}) untuk menetralkan saldo akun, Jurnal Umum, Neraca, dan Laba Rugi.
               </p>
             </div>
 

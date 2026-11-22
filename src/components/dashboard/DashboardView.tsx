@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { isTransactionIncludedInLedger } from '../../utils/accounting';
 import { 
   CheckCircle2, 
   Clock, 
@@ -59,7 +60,7 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
   const completedTodos = todos.filter(t => t.status === 'completed');
   const completionRate = todos.length > 0 ? Math.round((completedTodos.length / todos.length) * 100) : 0;
 
-  const activeTransactions = transactions.filter(t => !t.isVoided);
+  const activeTransactions = transactions.filter(isTransactionIncludedInLedger);
 
   // Multi-Account Finance calculations
   const { debts, accounts, myDebts } = useApp();
@@ -115,15 +116,6 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
             <p className="text-sm text-neutral-300 max-w-2xl">
               Tersedia <span className="font-semibold text-white">{accounts.length} rekening/dompet</span> aktif. Ada <span className="font-semibold text-amber-300">{myDebts.filter(d => d.status !== 'paid').length} hutang saya</span> dan <span className="font-semibold text-rose-400">{debts.filter(d => d.status !== 'paid').length} piutang orang lain</span> yang dapat ditagih.
             </p>
-          </div>
-
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              onClick={() => setActiveTab('finance')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-neutral-100 text-neutral-900 text-xs font-semibold shadow-sm transition-all cursor-pointer"
-            >
-              <span>Cek Saldo Harian</span>
-            </button>
           </div>
         </div>
 
@@ -534,7 +526,7 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
             </div>
 
             <div className="space-y-2">
-              {transactions.filter(t => !t.isVoided).slice(0, 3).map((tx) => {
+              {transactions.filter(isTransactionIncludedInLedger).slice(0, 3).map((tx) => {
                 const isIncome = tx.type === 'income';
 
                 return (

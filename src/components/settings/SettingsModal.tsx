@@ -88,12 +88,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setIsCompressingAvatar(true);
     try {
-      const compressed = await compressImageDataUrl(file, 360, 140000);
+      const compressed = await compressImageDataUrl(file, 360, 0.82);
       setAvatarUrl(compressed);
-      showToast('Foto profil siap disimpan', 'info');
+      updateProfile({ avatarUrl: compressed });
     } catch {
       showToast('Gagal memproses foto profil', 'error');
     } finally {
@@ -103,10 +104,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleQrFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setIsCompressingQr(true);
     try {
-      const compressed = await compressImageDataUrl(file, 420, 160000);
+      const compressed = await compressImageDataUrl(file, 420, 0.9);
       setPaymentQrDataUrl(compressed);
       showToast('Gambar QR Pembayaran siap disimpan', 'success');
     } catch {
@@ -250,9 +252,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
             <div className="flex items-center gap-4 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800">
               <img
-                src={avatarUrl}
+                key={avatarUrl}
+                src={avatarUrl || profile.avatarUrl}
                 alt={name}
                 referrerPolicy="no-referrer"
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (img.src !== window.location.origin + '/src/assets/images/user_avatar_1793517278515.jpg') {
+                    img.src = '/src/assets/images/user_avatar_1793517278515.jpg';
+                  }
+                }}
                 className="w-14 h-14 rounded-full object-cover ring-2 ring-indigo-500/30 bg-neutral-200 dark:bg-neutral-800"
               />
               <div className="flex-1 min-w-0 space-y-2">

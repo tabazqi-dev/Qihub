@@ -9,6 +9,23 @@ import {
   DebtReceivable 
 } from '../types';
 
+export const isContraVoidTransaction = (tx: Pick<FinanceTransaction, 'id' | 'title'>): boolean => {
+  return tx.id.startsWith('tx-void-') || tx.title.startsWith('[VOID] ');
+};
+
+export const isLegacyVoidWithoutContra = (tx: Pick<FinanceTransaction, 'isVoided' | 'voidReason'>): boolean => {
+  return Boolean(tx.isVoided && !tx.voidReason?.includes('[CONTRA:'));
+};
+
+export const isTransactionIncludedInLedger = (tx: Pick<FinanceTransaction, 'isVoided' | 'voidReason'>): boolean => {
+  return !isLegacyVoidWithoutContra(tx);
+};
+
+export const formatVoidReason = (reason?: string): string => {
+  if (!reason) return '';
+  return reason.replace(/\[CONTRA:[^\]]+\]\s*/g, '').trim();
+};
+
 // =========================================================================
 // STANDARD CHART OF ACCOUNTS (COA) / BAGAN AKUN STANDAR AKUNTANSI (PSAK)
 // =========================================================================
@@ -442,15 +459,21 @@ export const generateStandardJournalEntries = (
     }
   });
 
-  // 2. Regular Transactions, Adjustments & Transfers Journal Entries
+  // 2. Regular Transactions, Adjustments, Transfers & Void Contra Journal Entries
   transactions.forEach((tx, index) => {
-    // Audit Rule: Voided transactions must NEVER post to General Journal or COA Balances
-    if (tx.isVoided) {
+    // Legacy voids (prior to contra-entry model) have no reversal entry so they are skipped
+    if (isLegacyVoidWithoutContra(tx)) {
       return;
     }
 
-    // If it's a transfer inflow, skip it because the paired transfer outflow already creates the full double-entry
-    if (tx.transferId && tx.type === 'income') {
+    const isVoidContra = isContraVoidTransaction(tx);
+
+    // If it's a transfer inflow, skip it because the paired transfer outflow creates the full double-entry
+    if (tx.transferId && !tx.transferId.startsWith('void-') && tx.type === 'income') {
+      return;
+    }
+    // For void contra of a transfer, skip the income leg and generate the full reversal from the expense leg
+    if (tx.transferId?.startsWith('void-') && tx.type === 'income') {
       return;
     }
 
@@ -463,12 +486,28 @@ export const generateStandardJournalEntries = (
     let debitCoa: ChartOfAccount;
     let creditCoa: ChartOfAccount;
     let entrySourceType: 'transaction' | 'transfer' | 'audit_adjustment' = 'transaction';
-    let refPrefix = 'TXN';
+    let refPrefix = isVoidContra ? 'VOID' : 'TXN';
 
-    if (tx.coaCode) {
+    if (isVoidContra && tx.debitAccountCode && tx.creditAccountCode) {
+      entrySourceType = 'audit_adjustment';
+      debitCoa = allCoa.find(c => c.code === tx.debitAccountCode) || {
+        code: tx.debitAccountCode,
+        name: tx.debitAccountName || tx.debitAccountCode,
+        category: tx.debitAccountCode.startsWith('1') ? 'asset' : tx.debitAccountCode.startsWith('2') ? 'liability' : tx.debitAccountCode.startsWith('3') ? 'equity' : tx.debitAccountCode.startsWith('4') ? 'revenue' : 'expense',
+        subCategory: 'Jurnal Lawan Void',
+        normalBalance: 'debit'
+      };
+      creditCoa = allCoa.find(c => c.code === tx.creditAccountCode) || {
+        code: tx.creditAccountCode,
+        name: tx.creditAccountName || tx.creditAccountCode,
+        category: tx.creditAccountCode.startsWith('1') ? 'asset' : tx.creditAccountCode.startsWith('2') ? 'liability' : tx.creditAccountCode.startsWith('3') ? 'equity' : tx.creditAccountCode.startsWith('4') ? 'revenue' : 'expense',
+        subCategory: 'Jurnal Lawan Void',
+        normalBalance: 'credit'
+      };
+    } else if (tx.coaCode) {
       // Explicit COA Adjustment selected from Akun & Saldo Awal
       entrySourceType = 'audit_adjustment';
-      refPrefix = 'ADJ';
+      refPrefix = isVoidContra ? 'VOID' : 'ADJ';
       const inferredCategory: CoaClass = tx.coaCode.startsWith('1')
         ? 'asset'
         : tx.coaCode.startsWith('2')
@@ -495,14 +534,37 @@ export const generateStandardJournalEntries = (
         creditCoa = assetCoa;
       }
     } else if (tx.transferId && tx.category === 'Transfer & Tarik Tunai') {
-      // Transfer / Tarik Tunai Antar Akun (Asset-to-Asset Swap)
+      // Transfer / Tarik Tunai Antar Akun (or its Void Contra reversal)
       entrySourceType = 'transfer';
-      refPrefix = 'TRF';
+      refPrefix = isVoidContra ? 'VOID' : 'TRF';
       const targetAcc = accounts.find(a => a.id === tx.targetAccountId) ||
                          accounts.find(a => a.name === tx.targetAccountName) ||
                          accounts[0];
       debitCoa = targetAcc ? getCoaForFinancialAccount(targetAcc, allCoa) : allCoa[0];
       creditCoa = assetCoa;
+    } else if (isVoidContra) {
+      // Reversal of a regular income/expense/debt transaction: mirror exact original COA
+      const origType: 'income' | 'expense' = tx.type === 'income' ? 'expense' : 'income';
+      let origContraCoa: ChartOfAccount;
+      if (origType === 'income') {
+        origContraCoa = getCoaForCategory(tx.category, 'income', allCoa);
+        // Original was Debit Asset, Credit Revenue -> Contra (expense) Debits Revenue, Credits Asset
+        debitCoa = origContraCoa;
+        creditCoa = assetCoa;
+      } else {
+        if (tx.relatedDebtId || tx.category.toLowerCase().includes('hutang') || tx.category.toLowerCase().includes('cicilan')) {
+          origContraCoa = allCoa.find(c => c.code === '2-1200') || allCoa.find(c => c.code === '2-1100') || allCoa[0];
+        } else if (tx.category.toLowerCase().includes('piutang') || tx.category.toLowerCase().includes('pinjaman')) {
+          origContraCoa = allCoa.find(c => c.code === '1-1400') || allCoa[0];
+        } else if (tx.category.toLowerCase().includes('admin') || tx.category.toLowerCase().includes('biaya')) {
+          origContraCoa = allCoa.find(c => c.code === '5-1700') || allCoa[0];
+        } else {
+          origContraCoa = getCoaForCategory(tx.category, 'expense', allCoa);
+        }
+        // Original was Debit Expense, Credit Asset -> Contra (income) Debits Asset, Credits Expense
+        debitCoa = assetCoa;
+        creditCoa = origContraCoa;
+      }
     } else if (tx.type === 'income') {
       // Income: Debit Kas/Bank (Asset), Credit Pendapatan/Revenue
       debitCoa = assetCoa;
