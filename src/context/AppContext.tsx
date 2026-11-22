@@ -1,24 +1,34 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
-import { 
-  NavigationTab, 
-  TodoItem, 
-  FinanceTransaction, 
+import {
+  User,
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut
+} from 'firebase/auth';
+import { auth, googleProvider } from '../firebase';
+import {
+  NavigationTab,
+  TodoItem,
+  FinanceTransaction,
   DebtReceivable,
   CategoryBudget,
-  NoteItem, 
-  UserProfile, 
+  NoteItem,
+  UserProfile,
   HabitItem,
   FinancialAccount,
   MyDebtLiability,
   DailyAuditRecord,
   AccountAuditItem,
   AccountTransferPayload,
+  CoaAdjustmentPayload,
   ReimbursementItem,
   ReimburseRate,
   ReimburseRole,
   ReimburseProjectType,
-  ReimburseStatus
+  ReimburseStatus,
+  LogbookEntry,
+  SavedBarcode
 } from '../types';
 
 interface ToastMessage {
@@ -27,21 +37,31 @@ interface ToastMessage {
   type: 'success' | 'info' | 'warning' | 'error';
 }
 
+export type SyncStatus = 'local' | 'syncing' | 'synced' | 'error';
+
 interface AppContextType {
+  // Cloud Sync & Auth
+  user: User | null;
+  authLoading: boolean;
+  syncStatus: SyncStatus;
+  signInWithGoogle: () => Promise<void>;
+  signOutGoogle: () => Promise<void>;
+  pushLocalWorkspaceToCloud: () => Promise<void>;
+
   activeTab: NavigationTab;
   setActiveTab: (tab: NavigationTab) => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
   profile: UserProfile;
   updateProfile: (profile: Partial<UserProfile>) => void;
-  
+
   // Todos
   todos: TodoItem[];
   addTodo: (todo: Omit<TodoItem, 'id'>) => void;
   updateTodo: (id: string, updates: Partial<TodoItem>) => void;
   deleteTodo: (id: string) => void;
   toggleTodoStatus: (id: string) => void;
-  
+
   // Financial Accounts & Saldo Awal (Bank, E-Wallet, Cash)
   accounts: FinancialAccount[];
   addAccount: (account: Omit<FinancialAccount, 'id'>) => void;
@@ -50,12 +70,14 @@ interface AppContextType {
   updateInitialBalance: (id: string, initialBalance: number) => void;
   importAccountsFromCSV: (csvText: string) => { success: boolean; count: number; error?: string };
   transferBetweenAccounts: (payload: AccountTransferPayload) => { success: boolean; transferId?: string; error?: string };
+  addCoaAdjustment: (payload: CoaAdjustmentPayload) => void;
 
   // Finance Transactions & Cash / Non-Cash
   transactions: FinanceTransaction[];
   addTransaction: (tx: Omit<FinanceTransaction, 'id'>) => void;
   deleteTransaction: (id: string) => void;
   updateTransaction: (id: string, updates: Partial<FinanceTransaction>) => void;
+  voidTransaction: (id: string, reason?: string) => void;
 
   // Debts / Piutang Orang Lain ke Saya
   debts: DebtReceivable[];
@@ -63,6 +85,7 @@ interface AppContextType {
   updateDebt: (id: string, updates: Partial<DebtReceivable>) => void;
   deleteDebt: (id: string) => void;
   recordDebtPayment: (id: string, paymentAmount: number, destinationAccountId?: string) => void;
+  increaseDebtAmount: (id: string, addedAmount: number, notes?: string, newDueDate?: string) => void;
 
   // Hutang Saya ke Pihak Lain (Liabilitas / Cicilan Transaksi)
   myDebts: MyDebtLiability[];
@@ -71,7 +94,7 @@ interface AppContextType {
   deleteMyDebt: (id: string) => void;
   payMyDebt: (debtId: string, amount: number, sourceAccountId: string, notes?: string) => void;
 
-  // Cek Harian & Rekonsiliasi Saldo (Daily Audit)
+  // Legacy Audit Records kept in context type for backup compatibility
   dailyAudits: DailyAuditRecord[];
   saveDailyAudit: (audit: Omit<DailyAuditRecord, 'id' | 'verifiedAt'>) => void;
   deleteDailyAudit: (id: string) => void;
@@ -80,7 +103,7 @@ interface AppContextType {
   // Category Budgets for Overbudget detection
   categoryBudgets: CategoryBudget[];
   updateCategoryBudget: (category: string, limit: number) => void;
-  
+
   // Notes
   notes: NoteItem[];
   noteCategories: string[];
@@ -107,6 +130,17 @@ interface AppContextType {
   addHabit: (title: string, color: string) => void;
   deleteHabit: (id: string) => void;
 
+  // Logbook Kerja
+  logbookEntries: LogbookEntry[];
+  addLogbookEntry: (entry: Omit<LogbookEntry, 'id' | 'createdAt'>) => void;
+  updateLogbookEntry: (id: string, updates: Partial<LogbookEntry>) => void;
+  deleteLogbookEntry: (id: string) => void;
+
+  // Saved Barcodes & QR Codes
+  savedBarcodes: SavedBarcode[];
+  addSavedBarcode: (barcode: Omit<SavedBarcode, 'id' | 'createdAt'>) => void;
+  deleteSavedBarcode: (id: string) => void;
+
   // Global Toast
   toasts: ToastMessage[];
   showToast: (message: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -116,7 +150,7 @@ interface AppContextType {
   exportDataJSON: () => void;
   importDataJSON: (jsonString: string) => boolean;
   resetAllData: () => void;
-  
+
   // Global search
   searchQuery: string;
   setSearchQuery: (query: string) => void;
@@ -184,6 +218,7 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     paymentMethod: 'Bank Transfer',
     walletType: 'non_cash',
     accountName: 'BCA Utama',
+    accountId: 'acc-bca',
     notes: 'Transfer otomatis payroll.'
   },
   {
@@ -195,7 +230,8 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     date: '2026-11-01',
     paymentMethod: 'Credit Card',
     walletType: 'non_cash',
-    accountName: 'Kartu Kredit Mandiri',
+    accountName: 'Mandiri Payroll',
+    accountId: 'acc-mandiri',
     notes: 'Google Cloud & Vercel'
   },
   {
@@ -208,6 +244,7 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     paymentMethod: 'Cash',
     walletType: 'cash',
     accountName: 'Dompet Tunai Fisik',
+    accountId: 'acc-cash',
     notes: 'Tarik tunai ATM BCA'
   },
   {
@@ -220,6 +257,7 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     paymentMethod: 'Cash',
     walletType: 'cash',
     accountName: 'Dompet Tunai Fisik',
+    accountId: 'acc-cash',
     notes: 'Pembayaran uang tunai'
   },
   {
@@ -232,6 +270,7 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     paymentMethod: 'E-Wallet',
     walletType: 'non_cash',
     accountName: 'GoPay',
+    accountId: 'acc-gopay',
     notes: 'Dinner dengan klien'
   },
   {
@@ -244,6 +283,7 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     paymentMethod: 'Cash',
     walletType: 'cash',
     accountName: 'Dompet Tunai Fisik',
+    accountId: 'acc-cash',
     notes: 'Uang bensin cash'
   },
   {
@@ -256,6 +296,7 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     paymentMethod: 'Bank Transfer',
     walletType: 'non_cash',
     accountName: 'BCA Utama',
+    accountId: 'acc-bca',
     notes: 'DP 50% dari klien'
   },
   {
@@ -268,6 +309,7 @@ const SEED_TRANSACTIONS: FinanceTransaction[] = [
     paymentMethod: 'E-Wallet',
     walletType: 'non_cash',
     accountName: 'OVO',
+    accountId: 'acc-ovo',
     notes: 'Groceries bulanan'
   }
 ];
@@ -329,19 +371,19 @@ const SEED_CATEGORY_BUDGETS: CategoryBudget[] = [
 const SEED_NOTES: NoteItem[] = [
   {
     id: 'nt-1',
-    title: 'Panduan Arsitektur Modular OmniHub',
+    title: "Panduan Arsitektur Modular Q'Hub",
     category: 'Architecture',
     tags: ['Framework', 'Guide', 'Scalability'],
     isPinned: true,
     createdAt: '2026-10-25',
     updatedAt: '2026-11-01',
-    content: `# Arsitektur Super App OmniHub
+    content: `# Arsitektur Super App Q'Hub
 
-OmniHub dirancang dengan prinsip **Domain-Driven Modular Architecture**:
+Q'Hub dirancang dengan prinsip **Domain-Driven Modular Architecture**:
 - Pemisahan dompet Tunai (Cash) dan Non-Tunai (Rekening/E-Wallet)
-- Manajemen Piutang & Generator Invoice Resmi siap kirim WhatsApp
+- Manajemen Piutang & Generator Invoice Resmi siap kirim WhatsApp + QR Code
 - Engine Remove BG client-side cepat tanpa kirim data ke luar
-- Laporan Bulanan Laba-Rugi (P&L) dengan alarm deteksi overbudget otomatis
+- General Ledger, Neraca (Balance Sheet), & Laporan Bulanan Laba-Rugi (P&L)
 `
   }
 ];
@@ -449,27 +491,6 @@ const SEED_MY_DEBTS: MyDebtLiability[] = [
   }
 ];
 
-const SEED_DAILY_AUDITS: DailyAuditRecord[] = [
-  {
-    id: 'audit-1',
-    date: '2026-11-01',
-    verifiedAt: '2026-11-01T21:00:00.000Z',
-    accountAudits: [
-      { accountId: 'acc-bca', accountName: 'BCA Utama', accountType: 'bank', systemBalance: 46500000, actualBalance: 46500000, difference: 0 },
-      { accountId: 'acc-mandiri', accountName: 'Mandiri Payroll', accountType: 'bank', systemBalance: 5750000, actualBalance: 5750000, difference: 0 },
-      { accountId: 'acc-gopay', accountName: 'GoPay', accountType: 'ewallet', systemBalance: 170000, actualBalance: 170000, difference: 0 },
-      { accountId: 'acc-dana', accountName: 'DANA', accountType: 'ewallet', systemBalance: 600000, actualBalance: 600000, difference: 0 },
-      { accountId: 'acc-ovo', accountName: 'OVO', accountType: 'ewallet', systemBalance: 450000, actualBalance: 450000, difference: 0 },
-      { accountId: 'acc-cash', accountName: 'Dompet Tunai Fisik', accountType: 'cash', systemBalance: 1450000, actualBalance: 1450000, difference: 0 }
-    ],
-    totalSystemBalance: 54920000,
-    totalActualBalance: 54920000,
-    totalDifference: 0,
-    isBalanced: true,
-    notes: 'Semua saldo bank, e-wallet, dan uang fisik cocok 100%.'
-  }
-];
-
 const SEED_NOTE_CATEGORIES = ['Umum', 'Ide & Konsep', 'Materi & Riset', 'Work', 'Meeting', 'Arsitektur'];
 
 export const DEFAULT_REIMBURSE_RATES: ReimburseRate[] = [
@@ -537,7 +558,7 @@ export const SEED_REIMBURSEMENTS: ReimbursementItem[] = [
     endDate: '2026-09-30',
     wdDays: 4,
     weDays: 0,
-    totalDays: 2, // 2 hari kerja (sehari 2 sesi -> 4 sesi WD)
+    totalDays: 2,
     description: 'Metland Marron Tomohon, Online, WD=4, WE=0, Project: 29/09/2026 - 30/09/2026',
     wdRate: 18750,
     weRate: 37500,
@@ -572,7 +593,33 @@ export const SEED_REIMBURSEMENTS: ReimbursementItem[] = [
   }
 ];
 
+class ApiRequestError extends Error {
+  status: number;
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function getBudgetDocId(category: string): string {
+  const slug = category.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return slug ? `bgt-${slug}`.slice(0, 120) : `bgt-${Date.now()}`;
+}
+
+function sanitizeImageDataUrl(val: string | undefined, maxLen = 245000): string | undefined {
+  if (!val) return undefined;
+  return val.length <= maxLen ? val : undefined;
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
+  const dbConfiguredRef = useRef<boolean>(true);
+  const lastSyncedAtRef = useRef<number>(0);
+
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('omnihub_theme');
@@ -585,7 +632,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : SEED_PROFILE;
   });
 
-  // Financial Accounts (Bank, E-Wallet, Cash) with initial balances
   const [accounts, setAccounts] = useState<FinancialAccount[]>(() => {
     const saved = localStorage.getItem('omnihub_accounts');
     return saved ? JSON.parse(saved) : SEED_ACCOUNTS;
@@ -601,22 +647,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : SEED_TRANSACTIONS;
   });
 
-  // Piutang Orang ke Saya
   const [debts, setDebts] = useState<DebtReceivable[]>(() => {
     const saved = localStorage.getItem('omnihub_debts');
     return saved ? JSON.parse(saved) : SEED_DEBTS;
   });
 
-  // Hutang Saya ke Pihak Lain (Liabilitas / PayLater / Cicilan)
   const [myDebts, setMyDebts] = useState<MyDebtLiability[]>(() => {
     const saved = localStorage.getItem('omnihub_my_debts');
     return saved ? JSON.parse(saved) : SEED_MY_DEBTS;
   });
 
-  // Cek Harian & Rekonsiliasi Saldo
   const [dailyAudits, setDailyAudits] = useState<DailyAuditRecord[]>(() => {
     const saved = localStorage.getItem('omnihub_daily_audits');
-    return saved ? JSON.parse(saved) : SEED_DAILY_AUDITS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [categoryBudgets, setCategoryBudgets] = useState<CategoryBudget[]>(() => {
@@ -638,9 +681,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // fallback
       }
     }
-    // Collect from seed notes and defaults
-    const combined = Array.from(new Set([...SEED_NOTE_CATEGORIES, ...SEED_NOTES.map(n => n.category)]));
-    return combined;
+    return Array.from(new Set([...SEED_NOTE_CATEGORIES, ...SEED_NOTES.map(n => n.category)]));
   });
 
   const [habits, setHabits] = useState<HabitItem[]>(() => {
@@ -648,19 +689,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : SEED_HABITS;
   });
 
-  // Reimbursement Module State (Rates & Claims from Excel)
+  const [logbookEntries, setLogbookEntries] = useState<LogbookEntry[]>(() => {
+    const saved = localStorage.getItem('omnihub_logbook_entries');
+    return saved ? JSON.parse(saved) : [
+      {
+        id: 'log-1',
+        date: new Date().toISOString().split('T')[0],
+        project: "Q'Hub Super App Development",
+        hours: 8,
+        category: 'Development',
+        description: 'Membangun modul logbook kerja dan integrasi export Excel (.xls).',
+        status: 'Completed',
+        createdAt: new Date().toISOString()
+      }
+    ];
+  });
+
+  const [savedBarcodes, setSavedBarcodes] = useState<SavedBarcode[]>(() => {
+    const saved = localStorage.getItem('omnihub_saved_barcodes');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [reimbursements, setReimbursements] = useState<ReimbursementItem[]>(() => {
     const saved = localStorage.getItem('omnihub_reimbursements');
     if (saved) {
       try {
         const parsed: ReimbursementItem[] = JSON.parse(saved);
-        // Self-heal / migrate: Khusus Online, sehari dianggap 2 sesi, jadi # Hari Kerja = total sesi / 2
         return parsed.map(item => {
           if (item.typeProject === 'Online') {
-            const calculatedHari = Math.max(1, Math.round((item.wdDays + item.weDays) / 2));
             return {
               ...item,
-              totalDays: calculatedHari
+              totalDays: Math.max(1, Math.round((item.wdDays + item.weDays) / 2))
             };
           }
           return item;
@@ -680,6 +739,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Latest state ref for first-login migration
+  const latestStateRef = useRef({
+    profile,
+    theme,
+    noteCategories,
+    accounts,
+    transactions,
+    debts,
+    myDebts,
+    categoryBudgets,
+    todos,
+    notes,
+    habits,
+    logbookEntries,
+    savedBarcodes,
+    reimbursements,
+    reimburseRates
+  });
+  latestStateRef.current = {
+    profile,
+    theme,
+    noteCategories,
+    accounts,
+    transactions,
+    debts,
+    myDebts,
+    categoryBudgets,
+    todos,
+    notes,
+    habits,
+    logbookEntries,
+    savedBarcodes,
+    reimbursements,
+    reimburseRates
+  };
+
   // Sync theme
   useEffect(() => {
     const root = document.documentElement;
@@ -691,62 +786,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('omnihub_theme', theme);
   }, [theme]);
 
-  // Persist items
-  useEffect(() => {
-    localStorage.setItem('omnihub_profile', JSON.stringify(profile));
-  }, [profile]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_todos', JSON.stringify(todos));
-  }, [todos]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_accounts', JSON.stringify(accounts));
-  }, [accounts]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_transactions', JSON.stringify(transactions));
-  }, [transactions]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_debts', JSON.stringify(debts));
-  }, [debts]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_my_debts', JSON.stringify(myDebts));
-  }, [myDebts]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_daily_audits', JSON.stringify(dailyAudits));
-  }, [dailyAudits]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_budgets', JSON.stringify(categoryBudgets));
-  }, [categoryBudgets]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_notes', JSON.stringify(notes));
-  }, [notes]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_note_categories', JSON.stringify(noteCategories));
-  }, [noteCategories]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_habits', JSON.stringify(habits));
-  }, [habits]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_reimbursements', JSON.stringify(reimbursements));
-  }, [reimbursements]);
-
-  useEffect(() => {
-    localStorage.setItem('omnihub_reimburse_rates', JSON.stringify(reimburseRates));
-  }, [reimburseRates]);
-
-  const toggleTheme = () => {
-    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
-  };
+  // Persist items locally as offline cache
+  useEffect(() => { localStorage.setItem('omnihub_profile', JSON.stringify(profile)); }, [profile]);
+  useEffect(() => { localStorage.setItem('omnihub_todos', JSON.stringify(todos)); }, [todos]);
+  useEffect(() => { localStorage.setItem('omnihub_accounts', JSON.stringify(accounts)); }, [accounts]);
+  useEffect(() => { localStorage.setItem('omnihub_transactions', JSON.stringify(transactions)); }, [transactions]);
+  useEffect(() => { localStorage.setItem('omnihub_debts', JSON.stringify(debts)); }, [debts]);
+  useEffect(() => { localStorage.setItem('omnihub_my_debts', JSON.stringify(myDebts)); }, [myDebts]);
+  useEffect(() => { localStorage.setItem('omnihub_daily_audits', JSON.stringify(dailyAudits)); }, [dailyAudits]);
+  useEffect(() => { localStorage.setItem('omnihub_budgets', JSON.stringify(categoryBudgets)); }, [categoryBudgets]);
+  useEffect(() => { localStorage.setItem('omnihub_notes', JSON.stringify(notes)); }, [notes]);
+  useEffect(() => { localStorage.setItem('omnihub_note_categories', JSON.stringify(noteCategories)); }, [noteCategories]);
+  useEffect(() => { localStorage.setItem('omnihub_habits', JSON.stringify(habits)); }, [habits]);
+  useEffect(() => { localStorage.setItem('omnihub_logbook_entries', JSON.stringify(logbookEntries)); }, [logbookEntries]);
+  useEffect(() => { localStorage.setItem('omnihub_saved_barcodes', JSON.stringify(savedBarcodes)); }, [savedBarcodes]);
+  useEffect(() => { localStorage.setItem('omnihub_reimbursements', JSON.stringify(reimbursements)); }, [reimbursements]);
+  useEffect(() => { localStorage.setItem('omnihub_reimburse_rates', JSON.stringify(reimburseRates)); }, [reimburseRates]);
 
   const showToast = (message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info') => {
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
@@ -760,69 +815,381 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  // ==================== POSTGRESQL API SYNC HELPERS ====================
+  const apiFetch = async <T = any>(path: string, init?: RequestInit): Promise<T> => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new ApiRequestError(401, 'Pengguna belum masuk.', 'UNAUTHENTICATED');
+    }
+    const token = await currentUser.getIdToken();
+    const res = await fetch(path, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...(init?.headers || {}),
+      },
+    });
+    const text = await res.text();
+    let payload: any = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = {};
+    }
+    if (!res.ok) {
+      throw new ApiRequestError(
+        res.status,
+        payload?.message || payload?.error || `HTTP ${res.status}`,
+        payload?.error
+      );
+    }
+    return payload as T;
+  };
+
+  const applyWorkspaceSnapshot = (ws: any) => {
+    if (!ws || typeof ws !== 'object') return;
+    if (ws.profile) {
+      setProfile({
+        name: ws.profile.name || SEED_PROFILE.name,
+        title: ws.profile.title || '',
+        avatarUrl: ws.profile.avatarUrl || SEED_PROFILE.avatarUrl,
+        currencySymbol: ws.profile.currencySymbol || 'Rp',
+        monthlyBudget: Number(ws.profile.monthlyBudget) || 0,
+        bankAccountDetails: ws.profile.bankAccountDetails || '',
+        paymentQrDataUrl: ws.profile.paymentQrDataUrl || undefined,
+      });
+    }
+    if (ws.preferences) {
+      if (ws.preferences.theme === 'dark' || ws.preferences.theme === 'light') {
+        setTheme(ws.preferences.theme);
+      }
+      if (Array.isArray(ws.preferences.noteCategories)) {
+        setNoteCategories(ws.preferences.noteCategories);
+      }
+    }
+    if (Array.isArray(ws.accounts)) setAccounts(ws.accounts);
+    if (Array.isArray(ws.transactions)) {
+      const sorted = [...ws.transactions].sort((a, b) => {
+        if (a.date !== b.date) return b.date.localeCompare(a.date);
+        return b.id.localeCompare(a.id);
+      });
+      setTransactions(sorted);
+    }
+    if (Array.isArray(ws.debts)) setDebts(ws.debts);
+    if (Array.isArray(ws.myDebts)) setMyDebts(ws.myDebts);
+    if (Array.isArray(ws.categoryBudgets)) setCategoryBudgets(ws.categoryBudgets);
+    if (Array.isArray(ws.todos)) setTodos(ws.todos);
+    if (Array.isArray(ws.notes)) setNotes(ws.notes);
+    if (Array.isArray(ws.habits)) setHabits(ws.habits);
+    if (Array.isArray(ws.logbookEntries)) setLogbookEntries(ws.logbookEntries);
+    if (Array.isArray(ws.savedBarcodes)) setSavedBarcodes(ws.savedBarcodes);
+    if (Array.isArray(ws.reimbursements)) setReimbursements(ws.reimbursements);
+    if (Array.isArray(ws.reimburseRates)) setReimburseRates(ws.reimburseRates);
+  };
+
+  const syncFullWorkspaceToPostgres = async (options?: { overwriteExisting?: boolean }) => {
+    const overwriteExisting = options?.overwriteExisting ?? true;
+    await apiFetch('/api/workspace/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        overwriteExisting,
+        workspace: latestStateRef.current,
+      }),
+    });
+    dbConfiguredRef.current = true;
+    lastSyncedAtRef.current = Date.now();
+  };
+
+  const loadWorkspaceFromPostgres = async (options?: { silent?: boolean }) => {
+    if (!auth.currentUser) return;
+    if (!options?.silent) setSyncStatus('syncing');
+    try {
+      const data = await apiFetch<{ initialized: boolean; workspace: any }>('/api/workspace');
+      dbConfiguredRef.current = true;
+      if (!data.initialized) {
+        await syncFullWorkspaceToPostgres({ overwriteExisting: false });
+      } else {
+        applyWorkspaceSnapshot(data.workspace);
+      }
+      lastSyncedAtRef.current = Date.now();
+      setSyncStatus('synced');
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED') {
+        dbConfiguredRef.current = false;
+        setSyncStatus('local');
+        return;
+      }
+      setSyncStatus('error');
+      console.error('Error loading PostgreSQL workspace:', err);
+      if (!options?.silent) {
+        showToast('Gagal memuat sinkronisasi PostgreSQL. Menggunakan cache lokal.', 'warning');
+      }
+    }
+  };
+
+  const cloudWriteDoc = async (colName: string, id: string, data: Record<string, unknown>) => {
+    if (!auth.currentUser || !dbConfiguredRef.current) return;
+    setSyncStatus('syncing');
+    try {
+      await apiFetch(`/api/workspace/${encodeURIComponent(colName)}`, {
+        method: 'POST',
+        body: JSON.stringify({ ...data, id }),
+      });
+      lastSyncedAtRef.current = Date.now();
+      setSyncStatus('synced');
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED') {
+        dbConfiguredRef.current = false;
+        setSyncStatus('local');
+        return;
+      }
+      setSyncStatus('error');
+      showToast('Gagal menyimpan perubahan ke database PostgreSQL.', 'error');
+      console.error('PostgreSQL CREATE failed:', colName, id, err);
+    }
+  };
+
+  const cloudUpdateDoc = async (colName: string, id: string, updates: Record<string, unknown>) => {
+    if (!auth.currentUser || !dbConfiguredRef.current) return;
+    setSyncStatus('syncing');
+    try {
+      if (colName === 'profile') {
+        await apiFetch('/api/workspace/profile', {
+          method: 'PUT',
+          body: JSON.stringify(updates),
+        });
+      } else if (colName === 'preferences') {
+        await apiFetch('/api/workspace/preferences', {
+          method: 'PUT',
+          body: JSON.stringify(updates),
+        });
+      } else {
+        await apiFetch(`/api/workspace/${encodeURIComponent(colName)}/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(updates),
+        });
+      }
+      lastSyncedAtRef.current = Date.now();
+      setSyncStatus('synced');
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED') {
+        dbConfiguredRef.current = false;
+        setSyncStatus('local');
+        return;
+      }
+      setSyncStatus('error');
+      showToast('Gagal memperbarui data di PostgreSQL.', 'error');
+      console.error('PostgreSQL UPDATE failed:', colName, id, err);
+    }
+  };
+
+  const cloudDeleteDoc = async (colName: string, id: string) => {
+    if (!auth.currentUser || !dbConfiguredRef.current) return;
+    setSyncStatus('syncing');
+    try {
+      await apiFetch(`/api/workspace/${encodeURIComponent(colName)}/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      lastSyncedAtRef.current = Date.now();
+      setSyncStatus('synced');
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED') {
+        dbConfiguredRef.current = false;
+        setSyncStatus('local');
+        return;
+      }
+      setSyncStatus('error');
+      showToast('Gagal menghapus data di PostgreSQL.', 'error');
+      console.error('PostgreSQL DELETE failed:', colName, id, err);
+    }
+  };
+
+  // ==================== CLOUD SYNC LIFECYCLE ====================
+  useEffect(() => {
+    let cancelled = false;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null);
+        setAuthLoading(false);
+        setSyncStatus('local');
+        return;
+      }
+
+      setUser(firebaseUser);
+      setAuthLoading(false);
+      dbConfiguredRef.current = true;
+      if (!cancelled) {
+        await loadWorkspaceFromPostgres();
+      }
+    });
+
+    const handleResumeSync = () => {
+      if (
+        !auth.currentUser ||
+        !dbConfiguredRef.current ||
+        document.visibilityState === 'hidden'
+      ) {
+        return;
+      }
+      if (Date.now() - lastSyncedAtRef.current > 15000) {
+        void loadWorkspaceFromPostgres({ silent: true });
+      }
+    };
+
+    window.addEventListener('focus', handleResumeSync);
+    document.addEventListener('visibilitychange', handleResumeSync);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', handleResumeSync);
+      document.removeEventListener('visibilitychange', handleResumeSync);
+      unsubscribeAuth();
+    };
+  }, []);
+
+  const signInWithGoogle = async () => {
+    try {
+      setSyncStatus('syncing');
+      const result = await signInWithPopup(auth, googleProvider);
+      showToast(`Berhasil masuk sebagai ${result.user.email}. Sinkronisasi Cloud aktif!`, 'success');
+    } catch (err: any) {
+      setSyncStatus('local');
+      if (err?.code === 'auth/popup-closed-by-user') {
+        showToast('Login Google dibatalkan.', 'info');
+      } else {
+        showToast(`Gagal masuk Google: ${err?.message || 'Silakan coba lagi'}`, 'error');
+      }
+    }
+  };
+
+  const signOutGoogle = async () => {
+    try {
+      await signOut(auth);
+      setSyncStatus('local');
+      showToast('Berhasil keluar dari akun Google. Aplikasi kembali ke mode penyimpanan lokal.', 'info');
+    } catch (err: any) {
+      showToast(`Gagal keluar: ${err?.message || 'Error'}`, 'error');
+    }
+  };
+
+  const pushLocalWorkspaceToCloud = async () => {
+    if (!auth.currentUser) {
+      showToast('Silakan login Google terlebih dahulu untuk sinkronisasi ke PostgreSQL.', 'warning');
+      return;
+    }
+    setSyncStatus('syncing');
+    try {
+      await syncFullWorkspaceToPostgres({ overwriteExisting: true });
+      setSyncStatus('synced');
+      showToast('Seluruh data berhasil disinkronkan ke PostgreSQL Cloud!', 'success');
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED') {
+        dbConfiguredRef.current = false;
+        setSyncStatus('local');
+        showToast('DATABASE_URL belum diatur di server. Data tetap tersimpan aman secara lokal.', 'warning');
+        return;
+      }
+      setSyncStatus('error');
+      console.error('Error pushing local workspace to PostgreSQL:', err);
+      showToast('Gagal sinkronisasi ke PostgreSQL. Periksa koneksi atau coba lagi.', 'error');
+    }
+  };
+
+  // ==================== ACTIONS ====================
+  const toggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    if (auth.currentUser) {
+      void cloudUpdateDoc('preferences', 'main', { theme: nextTheme });
+    }
+  };
+
   const updateProfile = (updates: Partial<UserProfile>) => {
-    setProfile(prev => ({ ...prev, ...updates }));
+    const cleanedUpdates: Partial<UserProfile> = { ...updates };
+    if (cleanedUpdates.avatarUrl && cleanedUpdates.avatarUrl.length > 245000) {
+      showToast('Ukuran foto terlalu besar, gunakan foto yang lebih kecil.', 'warning');
+      delete cleanedUpdates.avatarUrl;
+    }
+    if (cleanedUpdates.paymentQrDataUrl && cleanedUpdates.paymentQrDataUrl.length > 245000) {
+      showToast('Ukuran QR Code terlalu besar, gunakan gambar yang lebih kecil.', 'warning');
+      delete cleanedUpdates.paymentQrDataUrl;
+    }
+    setProfile(prev => ({ ...prev, ...cleanedUpdates }));
+    if (auth.currentUser) {
+      void cloudUpdateDoc('profile', 'main', cleanedUpdates as Record<string, unknown>);
+    }
     showToast('Profil dan informasi pembayaran diperbarui', 'success');
   };
 
   // Todo operations
   const addTodo = (newTodo: Omit<TodoItem, 'id'>) => {
     const id = 'td-' + Date.now();
-    setTodos(prev => [ { ...newTodo, id }, ...prev ]);
+    const item: TodoItem = { ...newTodo, id };
+    setTodos(prev => [item, ...prev]);
+    void cloudWriteDoc('todos', id, item as unknown as Record<string, unknown>);
     showToast(`Tugas "${newTodo.title}" berhasil ditambahkan!`, 'success');
   };
 
   const updateTodo = (id: string, updates: Partial<TodoItem>) => {
     setTodos(prev => prev.map(t => (t.id === id ? { ...t, ...updates } : t)));
+    void cloudUpdateDoc('todos', id, updates as Record<string, unknown>);
     showToast('Tugas diperbarui', 'info');
   };
 
   const deleteTodo = (id: string) => {
     setTodos(prev => prev.filter(t => t.id !== id));
+    void cloudDeleteDoc('todos', id);
     showToast('Tugas telah dihapus', 'info');
   };
 
   const toggleTodoStatus = (id: string) => {
-    setTodos(prev => prev.map(t => {
-      if (t.id === id) {
-        const nextStatus = t.status === 'completed' ? 'pending' : 'completed';
-        if (nextStatus === 'completed') {
-          confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
-        }
-        return {
-          ...t,
-          status: nextStatus,
-          completedAt: nextStatus === 'completed' ? new Date().toISOString().split('T')[0] : undefined
-        };
-      }
-      return t;
-    }));
+    const target = todos.find(t => t.id === id);
+    if (!target) return;
+    const nextStatus = target.status === 'completed' ? 'pending' : 'completed';
+    const nextCompletedAt = nextStatus === 'completed' ? new Date().toISOString().split('T')[0] : '';
+    if (nextStatus === 'completed') {
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
+    }
+    setTodos(prev => prev.map(t => (
+      t.id === id
+        ? { ...t, status: nextStatus, completedAt: nextCompletedAt || undefined }
+        : t
+    )));
+    void cloudUpdateDoc('todos', id, { status: nextStatus, completedAt: nextCompletedAt });
   };
 
   // Financial Accounts & Saldo Awal operations
   const addAccount = (account: Omit<FinancialAccount, 'id'>) => {
     const id = 'acc-' + Date.now();
-    const newAcc: FinancialAccount = { ...account, id, createdAt: new Date().toISOString() };
+    const createdAtIso = new Date().toISOString();
+    const newAcc: FinancialAccount = { ...account, id, createdAt: createdAtIso };
     setAccounts(prev => [...prev, newAcc]);
+    const { createdAt: clientCreatedAt, ...rest } = newAcc;
+    void cloudWriteDoc('accounts', id, { ...rest, clientCreatedAt });
     showToast(`Akun "${account.name}" berhasil ditambahkan dengan saldo awal Rp ${account.initialBalance.toLocaleString('id-ID')}`, 'success');
   };
 
   const updateAccount = (id: string, updates: Partial<FinancialAccount>) => {
     setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+    const { createdAt: _c, ...restUpdates } = updates;
+    void cloudUpdateDoc('accounts', id, restUpdates as Record<string, unknown>);
     showToast('Data akun diperbarui', 'info');
   };
 
   const deleteAccount = (id: string) => {
     setAccounts(prev => prev.filter(a => a.id !== id));
+    void cloudDeleteDoc('accounts', id);
     showToast('Akun berhasil dihapus', 'info');
   };
 
   const updateInitialBalance = (id: string, initialBalance: number) => {
     setAccounts(prev => prev.map(a => a.id === id ? { ...a, initialBalance } : a));
+    void cloudUpdateDoc('accounts', id, { initialBalance });
     showToast('Saldo awal berhasil diperbarui', 'success');
   };
 
-  // Upload / Import CSV Saldo Awal Bank, E-Wallet, Cash
   const importAccountsFromCSV = (csvText: string): { success: boolean; count: number; error?: string } => {
     try {
       const lines = csvText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -832,18 +1199,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       let parsedCount = 0;
       const updatedAccounts = [...accounts];
+      const changedAccounts: { isNew: boolean; acc: FinancialAccount }[] = [];
 
       lines.forEach((line, index) => {
-        // Skip header if contains 'nama' or 'name'
         if (index === 0 && (line.toLowerCase().includes('nama') || line.toLowerCase().includes('name'))) {
           return;
         }
 
-        // Parse comma or semicolon separated
         const parts = line.split(/[,;\t]/).map(p => p.trim().replace(/^["']|["']$/g, ''));
         if (parts.length >= 2) {
           const name = parts[0];
-          let rawType = (parts[1] || 'bank').toLowerCase();
+          const rawType = (parts[1] || 'bank').toLowerCase();
           let type: 'bank' | 'ewallet' | 'cash' = 'bank';
           if (rawType.includes('wallet') || rawType.includes('ewallet') || rawType.includes('dana') || rawType.includes('gopay') || rawType.includes('ovo')) {
             type = 'ewallet';
@@ -851,7 +1217,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             type = 'cash';
           }
 
-          // Balance can be 3rd or 4th part
           let balance = 0;
           let accNum = '';
 
@@ -859,7 +1224,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             accNum = parts[2];
             balance = parseFloat(parts[3].replace(/[^0-9.-]/g, '')) || 0;
           } else if (parts.length === 3) {
-            // Check if parts[2] is number
             const possibleNum = parseFloat(parts[2].replace(/[^0-9.-]/g, ''));
             if (!isNaN(possibleNum)) {
               balance = possibleNum;
@@ -870,17 +1234,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
           const existingIndex = updatedAccounts.findIndex(a => a.name.toLowerCase() === name.toLowerCase());
           if (existingIndex >= 0) {
-            // Update initial balance
-            updatedAccounts[existingIndex] = {
+            const nextAcc = {
               ...updatedAccounts[existingIndex],
               type,
               initialBalance: balance,
               accountNumber: accNum || updatedAccounts[existingIndex].accountNumber
             };
+            updatedAccounts[existingIndex] = nextAcc;
+            changedAccounts.push({ isNew: false, acc: nextAcc });
           } else {
-            // Insert new account
             const color = type === 'cash' ? '#d97706' : type === 'ewallet' ? '#059669' : '#2563eb';
-            updatedAccounts.push({
+            const newAcc: FinancialAccount = {
               id: 'acc-' + Date.now() + Math.random().toString(36).substring(2, 5),
               name,
               type,
@@ -888,7 +1252,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               accountNumber: accNum,
               color,
               createdAt: new Date().toISOString()
-            });
+            };
+            updatedAccounts.push(newAcc);
+            changedAccounts.push({ isNew: true, acc: newAcc });
           }
           parsedCount++;
         }
@@ -896,6 +1262,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (parsedCount > 0) {
         setAccounts(updatedAccounts);
+        changedAccounts.forEach(({ isNew, acc }) => {
+          const { createdAt: clientCreatedAt, ...rest } = acc;
+          if (isNew) {
+            void cloudWriteDoc('accounts', acc.id, { ...rest, clientCreatedAt });
+          } else {
+            void cloudUpdateDoc('accounts', acc.id, {
+              type: acc.type,
+              initialBalance: acc.initialBalance,
+              accountNumber: acc.accountNumber
+            });
+          }
+        });
         showToast(`Berhasil mengimpor saldo awal untuk ${parsedCount} akun!`, 'success');
         return { success: true, count: parsedCount };
       } else {
@@ -906,10 +1284,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Transfer Antar Akun & Tarik Tunai
   const transferBetweenAccounts = (payload: AccountTransferPayload): { success: boolean; transferId?: string; error?: string } => {
     const { sourceAccountId, targetAccountId, amount, adminFee = 0, date, transferType, notes } = payload;
-    
+
     if (sourceAccountId === targetAccountId) {
       showToast('Akun asal dan akun tujuan tidak boleh sama!', 'error');
       return { success: false, error: 'Akun asal dan tujuan sama' };
@@ -928,10 +1305,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: 'Akun tidak ditemukan' };
     }
 
-    const transferId = 'trf-' + Date.now();
+    const baseTs = Date.now();
+    const transferId = 'trf-' + baseTs;
     const txDate = date || new Date().toISOString().split('T')[0];
 
-    // Descriptive labels
     let outTitle = `Transfer ke ${targetAcc.name}`;
     let inTitle = `Transfer dari ${sourceAcc.name}`;
     let successMessage = `Transfer Rp ${amount.toLocaleString('id-ID')} dari ${sourceAcc.name} ke ${targetAcc.name} berhasil!`;
@@ -952,9 +1329,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newTransactions: FinanceTransaction[] = [];
 
-    // 1. Mutasi Keluar di Akun Asal
     const outTx: FinanceTransaction = {
-      id: 'tx-trf-out-' + Date.now(),
+      id: 'tx-trf-out-' + baseTs,
       type: 'expense',
       title: outTitle,
       amount,
@@ -972,9 +1348,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     newTransactions.push(outTx);
 
-    // 2. Mutasi Masuk di Akun Tujuan
     const inTx: FinanceTransaction = {
-      id: 'tx-trf-in-' + (Date.now() + 1),
+      id: 'tx-trf-in-' + (baseTs + 1),
       type: 'income',
       title: inTitle,
       amount,
@@ -992,10 +1367,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     newTransactions.push(inTx);
 
-    // 3. Biaya Admin di Akun Asal (jika ada)
     if (adminFee > 0) {
       const feeTx: FinanceTransaction = {
-        id: 'tx-trf-fee-' + (Date.now() + 2),
+        id: 'tx-trf-fee-' + (baseTs + 2),
         type: 'expense',
         title: `Biaya Admin ${transferType === 'cash_withdrawal' ? 'Tarik Tunai' : 'Transfer'} (${sourceAcc.name})`,
         amount: adminFee,
@@ -1012,15 +1386,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setTransactions(prev => [...newTransactions, ...prev]);
+    newTransactions.forEach(tx => {
+      void cloudWriteDoc('transactions', tx.id, tx as unknown as Record<string, unknown>);
+    });
     confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
     showToast(successMessage, 'success');
     return { success: true, transferId };
   };
 
+  // Adjustment Akun + Pilih COA
+  const addCoaAdjustment = (payload: CoaAdjustmentPayload) => {
+    const targetAcc = accounts.find(a => a.id === payload.accountId);
+    if (!targetAcc || payload.amount <= 0) {
+      showToast('Pilih akun dan masukkan nominal adjustment yang valid.', 'error');
+      return;
+    }
+    const id = 'tx-adj-' + Date.now();
+    const isIncrease = payload.adjustmentType === 'increase';
+    const adjTx: FinanceTransaction = {
+      id,
+      type: isIncrease ? 'income' : 'expense',
+      title: payload.description.trim() || `Adjustment ${isIncrease ? '+' : '-'} (${payload.coaName})`,
+      amount: payload.amount,
+      category: 'Penyesuaian COA',
+      date: payload.date || new Date().toISOString().split('T')[0],
+      paymentMethod: targetAcc.type === 'cash' ? 'Cash' : targetAcc.type === 'ewallet' ? 'E-Wallet' : 'Bank Transfer',
+      walletType: targetAcc.type === 'cash' ? 'cash' : 'non_cash',
+      accountId: targetAcc.id,
+      accountName: targetAcc.name,
+      isAdjustment: true,
+      coaCode: payload.coaCode,
+      coaName: payload.coaName,
+      notes: `Adjustment Saldo ${targetAcc.name} (${isIncrease ? 'Penambahan +' : 'Pengurangan -'}) contra COA [${payload.coaCode}] ${payload.coaName}`
+    };
+
+    setTransactions(prev => [adjTx, ...prev]);
+    void cloudWriteDoc('transactions', id, adjTx as unknown as Record<string, unknown>);
+    showToast(
+      `Adjustment ${targetAcc.name} (${isIncrease ? '+' : '-'} Rp ${payload.amount.toLocaleString('id-ID')}) contra [${payload.coaCode}] berhasil dicatat!`,
+      'success'
+    );
+  };
+
   // Finance operations
   const addTransaction = (tx: Omit<FinanceTransaction, 'id'>) => {
     const id = 'tx-' + Date.now();
-    // Resolve account if accountId or accountName is passed
     const matchedAccount = accounts.find(a => a.id === tx.accountId) || accounts.find(a => a.name === tx.accountName);
     const resolvedWalletType = matchedAccount ? (matchedAccount.type === 'cash' ? 'cash' : 'non_cash') : tx.walletType;
     const resolvedAccountName = matchedAccount ? matchedAccount.name : tx.accountName;
@@ -1035,17 +1445,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setTransactions(prev => [finalTx, ...prev]);
+    void cloudWriteDoc('transactions', id, finalTx as unknown as Record<string, unknown>);
     showToast(`Transaksi "${tx.title}" dicatat (${resolvedAccountName || (tx.walletType === 'cash' ? 'Uang Tunai' : 'Non-Tunai')})`, 'success');
   };
 
   const deleteTransaction = (id: string) => {
     setTransactions(prev => prev.filter(t => t.id !== id));
+    void cloudDeleteDoc('transactions', id);
     showToast('Transaksi dihapus', 'info');
   };
 
   const updateTransaction = (id: string, updates: Partial<FinanceTransaction>) => {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    void cloudUpdateDoc('transactions', id, updates as Record<string, unknown>);
     showToast('Transaksi diperbarui', 'info');
+  };
+
+  // Void Transaction (Audit-safe cancellation preserving history)
+  const voidTransaction = (id: string, reason?: string) => {
+    const target = transactions.find(t => t.id === id);
+    if (!target || target.isVoided) return;
+
+    const voidedAt = new Date().toISOString();
+    const voidReason = (reason?.trim() || 'Dibatalkan (Void) oleh pengguna').slice(0, 300);
+
+    const idsToVoid = target.transferId
+      ? transactions.filter(t => t.transferId === target.transferId && !t.isVoided).map(t => t.id)
+      : [id];
+
+    setTransactions(prev => prev.map(t => (
+      idsToVoid.includes(t.id)
+        ? { ...t, isVoided: true, voidedAt, voidReason }
+        : t
+    )));
+
+    idsToVoid.forEach(txId => {
+      void cloudUpdateDoc('transactions', txId, {
+        isVoided: true,
+        voidedAt,
+        voidReason
+      });
+    });
+
+    showToast(
+      idsToVoid.length > 1
+        ? `Transaksi transfer (${idsToVoid.length} entri) telah di-VOID. Saldo & jurnal diperbarui.`
+        : `Transaksi "${target.title}" telah di-VOID. Saldo & laporan diperbarui.`,
+      'warning'
+    );
   };
 
   // Hutang Saya (Liabilitas / PayLater / Cicilan) operations
@@ -1053,21 +1500,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const id = 'mdeb-' + Date.now();
     const newDebt: MyDebtLiability = { ...debt, id };
     setMyDebts(prev => [newDebt, ...prev]);
+    void cloudWriteDoc('myDebts', id, newDebt as unknown as Record<string, unknown>);
     showToast(`Hutang baru kepada "${debt.creditorName}" berhasil dicatat!`, 'warning');
     return id;
   };
 
   const updateMyDebt = (id: string, updates: Partial<MyDebtLiability>) => {
     setMyDebts(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+    void cloudUpdateDoc('myDebts', id, updates as Record<string, unknown>);
     showToast('Data hutang diperbarui', 'info');
   };
 
   const deleteMyDebt = (id: string) => {
     setMyDebts(prev => prev.filter(d => d.id !== id));
+    void cloudDeleteDoc('myDebts', id);
     showToast('Hutang dihapus', 'info');
   };
 
-  // Bayar Hutang Saya: mencatat pelunasan & otomatis mengurangi saldo akun yang dipilih
   const payMyDebt = (debtId: string, amount: number, sourceAccountId: string, notes?: string) => {
     const targetDebt = myDebts.find(d => d.id === debtId);
     if (!targetDebt) return;
@@ -1075,22 +1524,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const sourceAcc = accounts.find(a => a.id === sourceAccountId);
     const sourceAccName = sourceAcc ? sourceAcc.name : 'Rekening';
 
-    // 1. Update status hutang
-    const nextPaid = targetDebt.amountPaid + amount;
+    const nextPaid = Math.min(targetDebt.amount, targetDebt.amountPaid + amount);
     const nextStatus = nextPaid >= targetDebt.amount ? 'paid' : nextPaid > 0 ? 'partial' : 'unpaid';
 
-    setMyDebts(prev => prev.map(d => {
-      if (d.id === debtId) {
-        return {
-          ...d,
-          amountPaid: nextPaid,
-          status: nextStatus
-        };
-      }
-      return d;
-    }));
+    setMyDebts(prev => prev.map(d => (
+      d.id === debtId ? { ...d, amountPaid: nextPaid, status: nextStatus } : d
+    )));
+    void cloudUpdateDoc('myDebts', debtId, { amountPaid: nextPaid, status: nextStatus });
 
-    // 2. Otomatis catat pengeluaran di transaksi dari akun tersebut
     const txId = 'tx-' + Date.now();
     const paymentTx: FinanceTransaction = {
       id: txId,
@@ -1108,101 +1549,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setTransactions(prev => [paymentTx, ...prev]);
+    void cloudWriteDoc('transactions', txId, paymentTx as unknown as Record<string, unknown>);
 
     if (nextStatus === 'paid') {
       confetti({ particleCount: 60, spread: 70, origin: { y: 0.7 } });
       showToast(`Hutang ke "${targetDebt.creditorName}" telah LUNAS! Saldo ${sourceAccName} terpotong Rp ${amount.toLocaleString('id-ID')}`, 'success');
     } else {
-      showToast(`Cicilan sebesar Rp ${amount.toLocaleString('id-ID')} berhasil dibayar via ${sourceAccName}. Sisa hutang: Rp ${(targetDebt.amount - nextPaid).toLocaleString('id-ID')}`, 'success');
+      showToast(`Cicilan sebesar Rp ${amount.toLocaleString('id-ID')} berhasil dibayar via ${sourceAccName}.`, 'success');
     }
   };
 
-  // Cek Harian & Rekonsiliasi Saldo (Daily Audit)
+  // Legacy daily audit methods preserved for compatibility
   const saveDailyAudit = (audit: Omit<DailyAuditRecord, 'id' | 'verifiedAt'>) => {
     const id = 'audit-' + Date.now();
-    const newRecord: DailyAuditRecord = {
-      ...audit,
-      id,
-      verifiedAt: new Date().toISOString()
-    };
-
-    // Replace if already audited for this date, or prepend
-    setDailyAudits(prev => {
-      const existsIndex = prev.findIndex(a => a.date === audit.date);
-      if (existsIndex >= 0) {
-        const copy = [...prev];
-        copy[existsIndex] = newRecord;
-        return copy;
-      }
-      return [newRecord, ...prev];
-    });
-
-    if (audit.isBalanced) {
-      confetti({ particleCount: 50, spread: 60, origin: { y: 0.75 } });
-      showToast(`Cek Harian tanggal ${audit.date} berhasil disimpan! Saldo sistem dan riil 100% COCOK.`, 'success');
-    } else {
-      showToast(`Cek Harian tanggal ${audit.date} disimpan. Terdapat selisih Rp ${Math.abs(audit.totalDifference).toLocaleString('id-ID')}.`, 'warning');
-    }
+    const newRecord: DailyAuditRecord = { ...audit, id, verifiedAt: new Date().toISOString() };
+    setDailyAudits(prev => [newRecord, ...prev]);
   };
-
   const deleteDailyAudit = (id: string) => {
     setDailyAudits(prev => prev.filter(a => a.id !== id));
-    showToast('Catatan audit harian dihapus', 'info');
   };
-
-  // Rekonsiliasi Cepat: Membuat transaksi penyesuaian agar saldo sistem sama dengan saldo riil
-  const autoReconcileDifference = (auditItem: AccountAuditItem, date: string) => {
-    const diff = auditItem.difference;
-    if (diff === 0) return;
-
-    const targetAcc = accounts.find(a => a.id === auditItem.accountId);
-    const accName = targetAcc ? targetAcc.name : auditItem.accountName;
-    const isSurplus = diff > 0; // actual > system => butuh income adjustment
-
-    const txId = 'tx-' + Date.now();
-    const adjustmentTx: FinanceTransaction = {
-      id: txId,
-      type: isSurplus ? 'income' : 'expense',
-      title: `Penyesuaian Opname Saldo: ${accName}`,
-      amount: Math.abs(diff),
-      category: 'Penyesuaian Saldo',
-      date,
-      paymentMethod: targetAcc?.type === 'cash' ? 'Cash' : targetAcc?.type === 'ewallet' ? 'E-Wallet' : 'Bank Transfer',
-      walletType: targetAcc?.type === 'cash' ? 'cash' : 'non_cash',
-      accountId: targetAcc?.id,
-      accountName: accName,
-      notes: `Otomatis dibuat dari Rekonsiliasi Harian agar saldo sistem cocok dengan saldo riil ${accName}`
-    };
-
-    setTransactions(prev => [adjustmentTx, ...prev]);
-
-    // Update daily audit state for this account to difference 0
-    setDailyAudits(prev => prev.map(audit => {
-      if (audit.date === date) {
-        const updatedItems = audit.accountAudits.map(item => {
-          if (item.accountId === auditItem.accountId) {
-            return {
-              ...item,
-              systemBalance: item.actualBalance,
-              difference: 0
-            };
-          }
-          return item;
-        });
-        const totalDiff = updatedItems.reduce((s, it) => s + Math.abs(it.difference), 0);
-        return {
-          ...audit,
-          accountAudits: updatedItems,
-          totalSystemBalance: updatedItems.reduce((s, it) => s + it.systemBalance, 0),
-          totalDifference: totalDiff,
-          isBalanced: totalDiff === 0
-        };
-      }
-      return audit;
-    }));
-
-    showToast(`Saldo ${accName} berhasil direkonsiliasi! Transaksi penyesuaian Rp ${Math.abs(diff).toLocaleString('id-ID')} dibuat.`, 'success');
-  };
+  const autoReconcileDifference = (_auditItem: AccountAuditItem, _date: string) => {};
 
   // Debt & Invoice operations
   const addDebt = (
@@ -1210,18 +1576,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     sourceAccountId?: string,
     deductFromAccount: boolean = false
   ) => {
-    const id = 'dbt-' + Date.now();
+    const baseTs = Date.now();
+    const id = 'dbt-' + baseTs;
     const invoiceNumber = `INV-${new Date().getFullYear()}-${String(debts.length + 1).padStart(3, '0')}`;
-    
+
     let disbursementTxId: string | undefined = undefined;
     let chosenAccName: string | undefined = undefined;
 
-    // If deduction from account is requested and sourceAccountId is selected
     if (deductFromAccount && sourceAccountId) {
       const sourceAcc = accounts.find(a => a.id === sourceAccountId);
       if (sourceAcc) {
         chosenAccName = sourceAcc.name;
-        disbursementTxId = 'tx-' + Date.now();
+        disbursementTxId = 'tx-' + (baseTs + 1);
         const disbursementTx: FinanceTransaction = {
           id: disbursementTxId,
           type: 'expense',
@@ -1237,6 +1603,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           notes: `Dana pinjaman piutang dipotong dari ${sourceAcc.name} untuk ${debt.debtorName}`
         };
         setTransactions(prev => [disbursementTx, ...prev]);
+        void cloudWriteDoc('transactions', disbursementTxId, disbursementTx as unknown as Record<string, unknown>);
       }
     }
 
@@ -1247,10 +1614,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sourceAccountId,
       sourceAccountName: chosenAccName,
       deductFromAccount: !!deductFromAccount,
-      disbursementTransactionId: disbursementTxId
+      disbursementTransactionId: disbursementTxId,
+      qrImageDataUrl: sanitizeImageDataUrl(debt.qrImageDataUrl)
     };
 
     setDebts(prev => [newDebt, ...prev]);
+    void cloudWriteDoc('debts', id, newDebt as unknown as Record<string, unknown>);
 
     if (disbursementTxId && chosenAccName) {
       showToast(`Piutang atas nama "${debt.debtorName}" (${invoiceNumber}) dicatat & saldo ${chosenAccName} terpotong Rp ${debt.amount.toLocaleString('id-ID')}!`, 'success');
@@ -1260,16 +1629,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateDebt = (id: string, updates: Partial<DebtReceivable>) => {
-    setDebts(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+    const cleanUpdates = { ...updates };
+    if (cleanUpdates.qrImageDataUrl && cleanUpdates.qrImageDataUrl.length > 245000) {
+      showToast('Ukuran gambar QR terlalu besar.', 'warning');
+      delete cleanUpdates.qrImageDataUrl;
+    }
+    setDebts(prev => prev.map(d => d.id === id ? { ...d, ...cleanUpdates } : d));
+    void cloudUpdateDoc('debts', id, cleanUpdates as Record<string, unknown>);
     showToast('Data piutang diperbarui', 'info');
+  };
+
+  const increaseDebtAmount = (id: string, addedAmount: number, notes?: string, newDueDate?: string) => {
+    const target = debts.find(d => d.id === id);
+    if (!target || addedAmount <= 0) return;
+
+    const nextAmount = target.amount + addedAmount;
+    const nextStatus = target.amountPaid >= nextAmount ? 'paid' : target.amountPaid > 0 ? 'partial' : 'unpaid';
+    const nextDueDate = newDueDate || target.dueDate;
+    const extraNote = notes?.trim()
+      ? (target.notes ? `${target.notes}\n+ Tambahan Rp ${addedAmount.toLocaleString('id-ID')}: ${notes.trim()}` : `+ Tambahan Rp ${addedAmount.toLocaleString('id-ID')}: ${notes.trim()}`)
+      : target.notes;
+
+    setDebts(prev => prev.map(d => (
+      d.id === id
+        ? { ...d, amount: nextAmount, status: nextStatus, dueDate: nextDueDate, notes: extraNote }
+        : d
+    )));
+
+    void cloudUpdateDoc('debts', id, {
+      amount: nextAmount,
+      status: nextStatus,
+      dueDate: nextDueDate,
+      notes: extraNote
+    });
+    showToast(`Nominal piutang ${target.debtorName} bertambah Rp ${addedAmount.toLocaleString('id-ID')}`, 'success');
   };
 
   const deleteDebt = (id: string) => {
     const target = debts.find(d => d.id === id);
     if (target?.disbursementTransactionId) {
-      setTransactions(prev => prev.filter(t => t.id !== target.disbursementTransactionId && t.relatedDebtId !== id));
+      const removedIds = transactions
+        .filter(t => t.id === target.disbursementTransactionId || t.relatedDebtId === id)
+        .map(t => t.id);
+      setTransactions(prev => prev.filter(t => !removedIds.includes(t.id)));
+      removedIds.forEach(txId => void cloudDeleteDoc('transactions', txId));
     }
     setDebts(prev => prev.filter(d => d.id !== id));
+    void cloudDeleteDoc('debts', id);
     showToast('Data piutang telah dihapus', 'info');
   };
 
@@ -1298,24 +1704,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           notes: `Penerimaan dana pelunasan piutang ke ${destAcc.name}`
         };
         setTransactions(prev => [repaymentTx, ...prev]);
+        void cloudWriteDoc('transactions', txId, repaymentTx as unknown as Record<string, unknown>);
       }
     }
 
-    setDebts(prev => prev.map(d => {
-      if (d.id === id) {
-        const nextPaid = d.amountPaid + paymentAmount;
-        const nextStatus = nextPaid >= d.amount ? 'paid' : nextPaid > 0 ? 'partial' : 'unpaid';
-        if (nextStatus === 'paid') {
-          confetti({ particleCount: 60, spread: 70, origin: { y: 0.7 } });
-        }
-        return {
-          ...d,
-          amountPaid: nextPaid,
-          status: nextStatus
-        };
-      }
-      return d;
-    }));
+    const nextPaid = Math.min(target.amount, target.amountPaid + paymentAmount);
+    const nextStatus = nextPaid >= target.amount ? 'paid' : nextPaid > 0 ? 'partial' : 'unpaid';
+    if (nextStatus === 'paid') {
+      confetti({ particleCount: 60, spread: 70, origin: { y: 0.7 } });
+    }
+
+    setDebts(prev => prev.map(d => (
+      d.id === id ? { ...d, amountPaid: nextPaid, status: nextStatus } : d
+    )));
+    void cloudUpdateDoc('debts', id, { amountPaid: nextPaid, status: nextStatus });
 
     if (destAccName) {
       showToast(`Pembayaran Rp ${paymentAmount.toLocaleString('id-ID')} dicatat & saldo ${destAccName} bertambah!`, 'success');
@@ -1325,60 +1727,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateCategoryBudget = (category: string, limit: number) => {
-    setCategoryBudgets(prev => {
-      const exists = prev.some(b => b.category === category);
-      if (exists) {
-        return prev.map(b => b.category === category ? { ...b, limit } : b);
-      }
-      return [...prev, { category, limit }];
-    });
+    const exists = categoryBudgets.some(b => b.category === category);
+    setCategoryBudgets(prev => (
+      exists
+        ? prev.map(b => b.category === category ? { ...b, limit } : b)
+        : [...prev, { category, limit }]
+    ));
+
+    const budgetId = getBudgetDocId(category);
+    if (exists) {
+      void cloudUpdateDoc('categoryBudgets', budgetId, { limit, category });
+    } else {
+      void cloudWriteDoc('categoryBudgets', budgetId, { category, limit });
+    }
     showToast(`Batas anggaran kategori "${category}" diperbarui`, 'success');
   };
 
   // Notes operations
   const addNote = (note: Omit<NoteItem, 'id' | 'createdAt' | 'updatedAt'>) => {
     const today = new Date().toISOString().split('T')[0];
-    const newNote: NoteItem = {
-      ...note,
-      id: 'nt-' + Date.now(),
-      createdAt: today,
-      updatedAt: today
-    };
+    const id = 'nt-' + Date.now();
+    const newNote: NoteItem = { ...note, id, createdAt: today, updatedAt: today };
     setNotes(prev => [newNote, ...prev]);
+    const { createdAt: clientCreatedAt, updatedAt: clientUpdatedAt, ...rest } = newNote;
+    void cloudWriteDoc('notes', id, { ...rest, clientCreatedAt, clientUpdatedAt });
     showToast(`Catatan "${note.title}" disimpan`, 'success');
   };
 
   const updateNote = (id: string, updates: Partial<NoteItem>) => {
     const today = new Date().toISOString().split('T')[0];
     setNotes(prev => prev.map(n => n.id === id ? { ...n, ...updates, updatedAt: today } : n));
+    const { createdAt: _c, updatedAt: _u, ...rest } = updates;
+    void cloudUpdateDoc('notes', id, { ...rest, clientUpdatedAt: today });
     showToast('Catatan diperbarui', 'info');
   };
 
   const deleteNote = (id: string) => {
     setNotes(prev => prev.filter(n => n.id !== id));
+    void cloudDeleteDoc('notes', id);
     showToast('Catatan dihapus', 'info');
   };
 
   const togglePinNote = (id: string) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, isPinned: !n.isPinned } : n));
+    const target = notes.find(n => n.id === id);
+    if (!target) return;
+    const today = new Date().toISOString().split('T')[0];
+    const nextPinned = !target.isPinned;
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, isPinned: nextPinned } : n));
+    void cloudUpdateDoc('notes', id, { isPinned: nextPinned, clientUpdatedAt: today });
   };
 
   const addNoteCategory = (category: string) => {
     const trimmed = category.trim();
     if (!trimmed) return;
-    setNoteCategories(prev => {
-      if (prev.includes(trimmed)) return prev;
-      return [...prev, trimmed];
-    });
+    const nextCats = noteCategories.includes(trimmed) ? noteCategories : [...noteCategories, trimmed];
+    setNoteCategories(nextCats);
+    void cloudUpdateDoc('preferences', 'main', { noteCategories: nextCats.slice(0, 50) });
     showToast(`Kategori "${trimmed}" berhasil ditambahkan!`, 'success');
   };
 
   const deleteNoteCategory = (category: string) => {
-    setNoteCategories(prev => prev.filter(c => c !== category));
+    const nextCats = noteCategories.filter(c => c !== category);
+    setNoteCategories(nextCats);
+    void cloudUpdateDoc('preferences', 'main', { noteCategories: nextCats.slice(0, 50) });
     showToast(`Kategori "${category}" dihapus`, 'info');
   };
 
-  // Reimbursement Module Operations (Excel Rate Matrix & Claims)
+  // Reimbursement Module Operations
   const addReimbursement = (item: Omit<ReimbursementItem, 'id' | 'no' | 'createdAt'>): string => {
     const id = 'rmb-' + Date.now();
     const nextNo = (reimbursements.length > 0 ? Math.max(...reimbursements.map(r => r.no)) : 0) + 1;
@@ -1394,26 +1809,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
     setReimbursements(prev => [newItem, ...prev]);
+    const { createdAt: clientCreatedAt, ...rest } = newItem;
+    void cloudWriteDoc('reimbursements', id, { ...rest, clientCreatedAt });
     showToast(`Klaim reimburse untuk "${item.property}" berhasil ditambahkan!`, 'success');
     return id;
   };
 
   const updateReimbursement = (id: string, updates: Partial<ReimbursementItem>) => {
-    setReimbursements(prev => prev.map(r => {
-      if (r.id === id) {
-        const merged = { ...r, ...updates };
-        if (merged.typeProject === 'Online') {
-          merged.totalDays = Math.max(1, Math.round((merged.wdDays + merged.weDays) / 2));
-        }
-        return merged;
-      }
-      return r;
-    }));
+    const existingItem = reimbursements.find(r => r.id === id);
+    if (!existingItem) return;
+    const merged = { ...existingItem, ...updates };
+    if (merged.typeProject === 'Online') {
+      merged.totalDays = Math.max(1, Math.round((merged.wdDays + merged.weDays) / 2));
+    }
+    setReimbursements(prev => prev.map(r => r.id === id ? merged : r));
+    const { createdAt: _c, id: _i, no: _n, ...rest } = merged;
+    void cloudUpdateDoc('reimbursements', id, rest as unknown as Record<string, unknown>);
     showToast('Data reimburse diperbarui', 'info');
   };
 
   const deleteReimbursement = (id: string) => {
     setReimbursements(prev => prev.filter(r => r.id !== id));
+    void cloudDeleteDoc('reimbursements', id);
     showToast('Klaim reimburse telah dihapus', 'info');
   };
 
@@ -1423,23 +1840,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const now = new Date();
     const formattedDeliveryDate = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+    const nextDeliveryDate = status === 'Done' ? (item.deliveryDate || formattedDeliveryDate) : item.deliveryDate;
+    const nextPaymentAccId = paymentAccountId || item.paymentAccountId;
 
-    setReimbursements(prev => prev.map(r => {
-      if (r.id === id) {
-        return {
-          ...r,
-          status,
-          deliveryDate: status === 'Done' ? (r.deliveryDate || formattedDeliveryDate) : r.deliveryDate,
-          paymentAccountId: paymentAccountId || r.paymentAccountId
-        };
-      }
-      return r;
-    }));
+    setReimbursements(prev => prev.map(r => (
+      r.id === id
+        ? { ...r, status, deliveryDate: nextDeliveryDate, paymentAccountId: nextPaymentAccId }
+        : r
+    )));
+
+    void cloudUpdateDoc('reimbursements', id, {
+      status,
+      deliveryDate: nextDeliveryDate,
+      paymentAccountId: nextPaymentAccId
+    });
 
     if (status === 'Done') {
       confetti({ particleCount: 60, spread: 70, origin: { y: 0.7 } });
-      
-      // If paymentAccountId is passed, deposit funds to financial account
       if (paymentAccountId) {
         const targetAcc = accounts.find(a => a.id === paymentAccountId);
         const txId = 'tx-rmb-' + Date.now();
@@ -1457,6 +1874,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           notes: `Pencairan klaim reimburse #${item.no} (${item.description}) ke ${targetAcc?.name || 'Rekening'}`
         };
         setTransactions(prev => [depositTx, ...prev]);
+        void cloudWriteDoc('transactions', txId, depositTx as unknown as Record<string, unknown>);
         showToast(`Reimburse "${item.property}" cair! Rp ${item.totalAmount.toLocaleString('id-ID')} masuk ke ${targetAcc?.name || 'rekening'}.`, 'success');
       } else {
         showToast(`Status klaim reimburse "${item.property}" selesai (Done)!`, 'success');
@@ -1467,48 +1885,99 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateReimburseRate = (role: ReimburseRole, type: ReimburseProjectType, wdRate: number, weRate: number) => {
-    setReimburseRates(prev => prev.map(r => {
-      if (r.role === role && r.type === type) {
-        return { ...r, wdRate, weRate };
-      }
-      return r;
-    }));
+    const target = reimburseRates.find(r => r.role === role && r.type === type);
+    setReimburseRates(prev => prev.map(r => (
+      r.role === role && r.type === type ? { ...r, wdRate, weRate } : r
+    )));
+    if (target) {
+      void cloudUpdateDoc('reimburseRates', target.id, { wdRate, weRate });
+    }
     showToast(`Tarif reimburse untuk ${role} (${type}) berhasil diperbarui!`, 'success');
   };
 
   const resetReimburseRatesToDefault = () => {
     setReimburseRates(DEFAULT_REIMBURSE_RATES);
+    DEFAULT_REIMBURSE_RATES.forEach(rt => {
+      void cloudUpdateDoc('reimburseRates', rt.id, { wdRate: rt.wdRate, weRate: rt.weRate });
+    });
     showToast('Tarif reimburse dikembalikan ke standar awal', 'info');
   };
 
   // Habit operations
   const toggleHabitDay = (habitId: string, dateStr: string) => {
-    setHabits(prev => prev.map(h => {
-      if (h.id === habitId) {
-        const exists = h.completedDays.includes(dateStr);
-        const updatedDays = exists 
-          ? h.completedDays.filter(d => d !== dateStr) 
-          : [...h.completedDays, dateStr];
-        return { ...h, completedDays: updatedDays };
-      }
-      return h;
-    }));
+    const target = habits.find(h => h.id === habitId);
+    if (!target) return;
+    const exists = target.completedDays.includes(dateStr);
+    const updatedDays = exists
+      ? target.completedDays.filter(d => d !== dateStr)
+      : [...target.completedDays, dateStr];
+    setHabits(prev => prev.map(h => h.id === habitId ? { ...h, completedDays: updatedDays } : h));
+    void cloudUpdateDoc('habits', habitId, { completedDays: updatedDays });
   };
 
   const addHabit = (title: string, color: string) => {
     const id = 'hb-' + Date.now();
-    setHabits(prev => [...prev, { id, title, targetPerWeek: 5, completedDays: [], color }]);
+    const newHabit: HabitItem = { id, title, targetPerWeek: 5, completedDays: [], color };
+    setHabits(prev => [...prev, newHabit]);
+    void cloudWriteDoc('habits', id, newHabit as unknown as Record<string, unknown>);
     showToast(`Habit "${title}" dibuat`, 'success');
   };
 
   const deleteHabit = (id: string) => {
     setHabits(prev => prev.filter(h => h.id !== id));
+    void cloudDeleteDoc('habits', id);
+  };
+
+  // Logbook Kerja operations
+  const addLogbookEntry = (entry: Omit<LogbookEntry, 'id' | 'createdAt'>) => {
+    const id = 'log-' + Date.now();
+    const createdAtIso = new Date().toISOString();
+    const newEntry: LogbookEntry = { ...entry, id, createdAt: createdAtIso };
+    setLogbookEntries(prev => [newEntry, ...prev]);
+    const { createdAt: clientCreatedAt, ...rest } = newEntry;
+    void cloudWriteDoc('logbook', id, { ...rest, clientCreatedAt });
+    showToast('Catatan logbook berhasil ditambahkan!', 'success');
+  };
+
+  const updateLogbookEntry = (id: string, updates: Partial<LogbookEntry>) => {
+    setLogbookEntries(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+    const { createdAt: _c, ...rest } = updates;
+    void cloudUpdateDoc('logbook', id, rest as Record<string, unknown>);
+    showToast('Logbook diperbarui', 'info');
+  };
+
+  const deleteLogbookEntry = (id: string) => {
+    setLogbookEntries(prev => prev.filter(e => e.id !== id));
+    void cloudDeleteDoc('logbook', id);
+    showToast('Catatan logbook dihapus', 'info');
+  };
+
+  // Saved Barcodes operations
+  const addSavedBarcode = (barcode: Omit<SavedBarcode, 'id' | 'createdAt'>) => {
+    const id = 'bc-' + Date.now();
+    const createdAtIso = new Date().toISOString();
+    const newBc: SavedBarcode = {
+      ...barcode,
+      dataUrl: sanitizeImageDataUrl(barcode.dataUrl),
+      id,
+      createdAt: createdAtIso
+    };
+    setSavedBarcodes(prev => [newBc, ...prev]);
+    const { createdAt: clientCreatedAt, ...rest } = newBc;
+    void cloudWriteDoc('barcodes', id, { ...rest, clientCreatedAt });
+    showToast(`"${barcode.title}" berhasil disimpan ke sistem!`, 'success');
+  };
+
+  const deleteSavedBarcode = (id: string) => {
+    setSavedBarcodes(prev => prev.filter(b => b.id !== id));
+    void cloudDeleteDoc('barcodes', id);
+    showToast('Kode tersimpan dihapus', 'info');
   };
 
   // Export / Import / Reset
   const exportDataJSON = () => {
     const payload = {
-      version: '1.2.0',
+      version: '3.0.0',
       exportedAt: new Date().toISOString(),
       profile,
       accounts,
@@ -1516,16 +1985,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transactions,
       debts,
       myDebts,
-      dailyAudits,
       categoryBudgets,
       notes,
-      habits
+      habits,
+      logbookEntries,
+      savedBarcodes,
+      reimbursements,
+      reimburseRates
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `omnihub-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `qhub-backup-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('Data berhasil diekspor sebagai JSON backup', 'success');
@@ -1540,10 +2012,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (Array.isArray(data.transactions)) setTransactions(data.transactions);
       if (Array.isArray(data.debts)) setDebts(data.debts);
       if (Array.isArray(data.myDebts)) setMyDebts(data.myDebts);
-      if (Array.isArray(data.dailyAudits)) setDailyAudits(data.dailyAudits);
       if (Array.isArray(data.categoryBudgets)) setCategoryBudgets(data.categoryBudgets);
       if (Array.isArray(data.notes)) setNotes(data.notes);
       if (Array.isArray(data.habits)) setHabits(data.habits);
+      if (Array.isArray(data.logbookEntries)) setLogbookEntries(data.logbookEntries);
+      if (Array.isArray(data.savedBarcodes)) setSavedBarcodes(data.savedBarcodes);
+      if (Array.isArray(data.reimbursements)) setReimbursements(data.reimbursements);
+      if (Array.isArray(data.reimburseRates)) setReimburseRates(data.reimburseRates);
+
+      if (auth.currentUser) {
+        setTimeout(() => {
+          if (auth.currentUser) {
+            void syncFullWorkspaceToPostgres({ overwriteExisting: true }).catch((err) => {
+              if (!(err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED')) {
+                console.error('Error syncing imported backup:', err);
+              }
+            });
+          }
+        }, 120);
+      }
       showToast('Data backup berhasil diimpor & disinkronkan!', 'success');
       return true;
     } catch {
@@ -1559,16 +2046,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTransactions(SEED_TRANSACTIONS);
     setDebts(SEED_DEBTS);
     setMyDebts(SEED_MY_DEBTS);
-    setDailyAudits(SEED_DAILY_AUDITS);
     setCategoryBudgets(SEED_CATEGORY_BUDGETS);
     setNotes(SEED_NOTES);
     setHabits(SEED_HABITS);
-    showToast('Data berhasil dikembalikan ke default template', 'info');
+    showToast('Data lokal dikembalikan ke template bawaan', 'info');
   };
 
   return (
     <AppContext.Provider
       value={{
+        user,
+        authLoading,
+        syncStatus,
+        signInWithGoogle,
+        signOutGoogle,
+        pushLocalWorkspaceToCloud,
         activeTab,
         setActiveTab,
         theme,
@@ -1582,6 +2074,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateInitialBalance,
         importAccountsFromCSV,
         transferBetweenAccounts,
+        addCoaAdjustment,
         todos,
         addTodo,
         updateTodo,
@@ -1591,11 +2084,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTransaction,
         deleteTransaction,
         updateTransaction,
+        voidTransaction,
         debts,
         addDebt,
         updateDebt,
         deleteDebt,
         recordDebtPayment,
+        increaseDebtAmount,
         myDebts,
         addMyDebt,
         updateMyDebt,
@@ -1627,6 +2122,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleHabitDay,
         addHabit,
         deleteHabit,
+        logbookEntries,
+        addLogbookEntry,
+        updateLogbookEntry,
+        deleteLogbookEntry,
+        savedBarcodes,
+        addSavedBarcode,
+        deleteSavedBarcode,
         toasts,
         showToast,
         removeToast,

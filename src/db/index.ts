@@ -1,34 +1,79 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.ts';
 
-// Add global connection pool caching to persist across hot-reloads
 declare global {
   var _postgresPool: Pool | undefined;
 }
 
-// Function to create or retrieve the connection pool.
-export const createPool = () => {
-  if (!global._postgresPool) {
-    global._postgresPool = new Pool({
-      host: process.env.SQL_HOST,
-      user: process.env.SQL_USER,
-      password: process.env.SQL_PASSWORD,
-      database: process.env.SQL_DB_NAME,
-      max: 10,
-      connectionTimeoutMillis: 15000,
-    });
+export function isDatabaseConfigured(): boolean {
+  return Boolean(
+    process.env.DATABASE_URL?.trim() ||
+    (process.env.SQL_HOST?.trim() && process.env.SQL_DB_NAME?.trim())
+  );
+}
 
-    // Prevent unhandled pool-level errors from crashing the application
+function shouldUseSsl(connectionString?: string): boolean | { rejectUnauthorized: false } {
+  if (process.env.PGSSLMODE === 'disable') return false;
+  if (!connectionString) return false;
+  if (connectionString.includes('localhost') || connectionString.includes('127.0.0.1')) {
+    return false;
+  }
+  if (connectionString.includes('sslmode=disable')) {
+    return false;
+  }
+  return { rejectUnauthorized: false };
+}
+
+export const getPool = (): Pool | null => {
+  if (!isDatabaseConfigured()) {
+    return null;
+  }
+
+  if (!global._postgresPool) {
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (databaseUrl) {
+      global._postgresPool = new Pool({
+        connectionString: databaseUrl,
+        ssl: shouldUseSsl(databaseUrl),
+        max: 5,
+        idleTimeoutMillis: 20000,
+        connectionTimeoutMillis: 15000,
+      });
+    } else {
+      global._postgresPool = new Pool({
+        host: process.env.SQL_HOST,
+        user: process.env.SQL_USER,
+        password: process.env.SQL_PASSWORD,
+        database: process.env.SQL_DB_NAME,
+        max: 5,
+        idleTimeoutMillis: 20000,
+        connectionTimeoutMillis: 15000,
+      });
+    }
+
     global._postgresPool.on('error', (err) => {
-      console.error('Unexpected error on idle SQL pool client:', err);
+      console.error('Unexpected error on idle PostgreSQL pool client:', err.message);
     });
   }
+
   return global._postgresPool;
 };
 
-// Create or retrieve the pool instance.
-const pool = createPool();
+export const getDb = (): NodePgDatabase<typeof schema> => {
+  const pool = getPool();
+  if (!pool) {
+    throw new Error('DATABASE_NOT_CONFIGURED');
+  }
+  return drizzle(pool, { schema });
+};
 
-// Initialize Drizzle with the pool and schema.
-export const db = drizzle(pool, { schema });
+// Backwards-compatible lazy export for queries.ts
+export const db = new Proxy({} as NodePgDatabase<typeof schema>, {
+  get(_target, prop) {
+    const instance = getDb();
+    const val = (instance as unknown as Record<PropertyKey, unknown>)[prop];
+    return typeof val === 'function' ? val.bind(instance) : val;
+  }
+});

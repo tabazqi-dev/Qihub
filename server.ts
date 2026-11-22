@@ -1,29 +1,44 @@
+import 'dotenv/config';
 import express from 'express';
-import { getChartOfAccounts, createJournalEntry, getGeneralLedger, getTrialBalance } from './src/db/queries.ts';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { app as apiApp } from './src/server/app.ts';
 
-const app = express();
-app.use(express.json());
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT) || 3000;
 
-app.get('/api/accounts', async (req, res) => {
-  res.json(await getChartOfAccounts());
-});
+async function startServer() {
+  const server = express();
 
-app.post('/api/journal', async (req, res) => {
-  try {
-    const { entry, items } = req.body;
-    await createJournalEntry(entry, items);
-    res.status(201).json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to create journal' });
+  // Mount shared Express API router (/api/*)
+  server.use(apiApp);
+
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    server.use(vite.middlewares);
+  } else {
+    const distPath = path.resolve(__dirname, 'dist');
+    server.use(express.static(distPath));
+
+    server.get('*', (req, res) => {
+      if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'API route not found' });
+      }
+      res.sendFile(path.join(distPath, 'index.html'), (err) => {
+        if (err) {
+          res.status(404).send('App not built yet. Please run npm run build.');
+        }
+      });
+    });
   }
-});
 
-app.get('/api/ledger/:accountId', async (req, res) => {
-  res.json(await getGeneralLedger(parseInt(req.params.accountId)));
-});
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  });
+}
 
-app.get('/api/trial-balance', async (req, res) => {
-  res.json(await getTrialBalance());
-});
-
-app.listen(3001, () => console.log('Server running on port 3001'));
+void startServer();

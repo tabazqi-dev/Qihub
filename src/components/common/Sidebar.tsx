@@ -15,7 +15,10 @@ import {
   ChevronLeft, 
   ChevronRight,
   Settings,
-  X
+  X,
+  ClipboardList,
+  Cloud,
+  CloudOff
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -40,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   onOpenSettings
 }) => {
-  const { activeTab, setActiveTab, todos, debts, reimbursements, profile } = useApp();
+  const { activeTab, setActiveTab, todos, debts, reimbursements, profile, user, syncStatus } = useApp();
 
   const pendingTodosCount = todos.filter(t => t.status !== 'completed').length;
   const pendingDebtsCount = debts.filter(d => d.status !== 'paid').length;
@@ -50,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: 'Dashboard Utama', icon: LayoutDashboard },
     { id: 'finance', label: 'Keuangan & Piutang', icon: Wallet, badge: pendingDebtsCount > 0 ? pendingDebtsCount : undefined },
     { id: 'reimburse', label: 'Reimburse Proyek', icon: Receipt, badge: pendingReimburseCount > 0 ? pendingReimburseCount : undefined },
+    { id: 'logbook', label: 'Logbook Kerja', icon: ClipboardList },
     { id: 'removebg', label: 'Remove Background', icon: Scissors },
     { id: 'todos', label: 'Todo & Kalender', icon: CalendarCheck, badge: pendingTodosCount > 0 ? pendingTodosCount : undefined },
     { id: 'notes', label: 'Catatan & Ide', icon: FileText },
@@ -91,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-sm tracking-tight text-neutral-900 dark:text-neutral-100 truncate">
-                    Qihub
+                    Q'Hub
                   </span>
                   <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-mono text-[9px] font-bold">
                     v3.0.0
@@ -200,8 +204,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
                   {profile.name}
                 </p>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
-                  {profile.title}
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate flex items-center gap-1">
+                  {user ? (
+                    <>
+                      <Cloud className="w-3 h-3 text-emerald-500 shrink-0" />
+                      <span className="truncate">{syncStatus === 'syncing' ? 'Menyinkron...' : user.email}</span>
+                    </>
+                  ) : (
+                    <>
+                      <CloudOff className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span className="truncate">Lokal • Ketuk untuk Sync</span>
+                    </>
+                  )}
                 </p>
               </div>
             )}
@@ -212,8 +226,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   e.stopPropagation();
                   onOpenSettings();
                 }}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
-                title="Buka Pengaturan"
+                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors cursor-pointer"
+                title="Buka Pengaturan & Cloud Sync"
               >
                 <Settings className="w-4 h-4" />
               </button>
@@ -222,7 +236,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {(!isCollapsed || isOpenMobile) && (
             <div className="pt-2 text-center">
               <span className="text-[10px] text-neutral-400 font-mono">
-                Qihub v3.0.0 • Enterprise Edition
+                Q'Hub v3.0.0 • Enterprise Edition
               </span>
             </div>
           )}

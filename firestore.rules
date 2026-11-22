@@ -1,0 +1,645 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Safety Net (Default Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Hardened Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isMasterUserOwner(userId) {
+      return isOwner(userId) && exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function hasValidTimestamps(data) {
+      return data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+    function hasPreservedImmutableMetadata() {
+      return incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+
+    // ==================== ENTITY VALIDATION BLUEPRINTS ====================
+
+    function isValidUserRoot(data, userId) {
+      return data.keys().hasAll(['ownerId', 'email', 'displayName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'email', 'displayName', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && hasValidTimestamps(data);
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['ownerId', 'name', 'title', 'avatarUrl', 'currencySymbol', 'monthlyBudget', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'name', 'title', 'avatarUrl', 'currencySymbol', 'monthlyBudget', 'bankAccountDetails', 'paymentQrDataUrl', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.title is string && data.title.size() <= 160
+        && data.avatarUrl is string && data.avatarUrl.size() <= 250000
+        && data.currencySymbol is string && data.currencySymbol.size() >= 1 && data.currencySymbol.size() <= 10
+        && data.monthlyBudget is number && data.monthlyBudget >= 0 && data.monthlyBudget <= 1000000000000
+        && (!('bankAccountDetails' in data) || (data.bankAccountDetails is string && data.bankAccountDetails.size() <= 1000))
+        && (!('paymentQrDataUrl' in data) || (data.paymentQrDataUrl is string && data.paymentQrDataUrl.size() <= 250000))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidUserPreferences(data, userId) {
+      return data.keys().hasAll(['ownerId', 'theme', 'noteCategories', 'initialized', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'theme', 'noteCategories', 'initialized', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.theme is string && data.theme.size() <= 10 && data.theme in ['dark', 'light']
+        && data.noteCategories is list && data.noteCategories.size() <= 50
+        && (data.noteCategories.size() == 0 || (data.noteCategories[0] is string && data.noteCategories[0].size() <= 80))
+        && data.initialized is bool
+        && hasValidTimestamps(data);
+    }
+
+    function isValidFinancialAccount(data, userId, accountId) {
+      return data.keys().hasAll(['ownerId', 'id', 'name', 'type', 'initialBalance', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'name', 'type', 'initialBalance', 'accountNumber', 'color', 'coaCode', 'notes', 'clientCreatedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == accountId
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.type is string && data.type.size() <= 16 && data.type in ['bank', 'ewallet', 'cash']
+        && data.initialBalance is number && data.initialBalance >= -1000000000000 && data.initialBalance <= 1000000000000
+        && (!('accountNumber' in data) || (data.accountNumber is string && data.accountNumber.size() <= 64))
+        && (!('color' in data) || (data.color is string && data.color.size() <= 32))
+        && (!('coaCode' in data) || (data.coaCode is string && data.coaCode.size() <= 32))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
+        && (!('clientCreatedAt' in data) || (data.clientCreatedAt is string && data.clientCreatedAt.size() <= 64))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidFinanceTransaction(data, userId, txId) {
+      return data.keys().hasAll(['ownerId', 'id', 'type', 'title', 'amount', 'category', 'date', 'paymentMethod', 'walletType', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'type', 'title', 'amount', 'category', 'date', 'paymentMethod', 'walletType', 'accountName', 'accountId', 'relatedDebtId', 'transferId', 'transferType', 'targetAccountId', 'targetAccountName', 'notes', 'debitAccountCode', 'debitAccountName', 'creditAccountCode', 'creditAccountName', 'isAdjustment', 'coaCode', 'coaName', 'isVoided', 'voidedAt', 'voidReason', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == txId
+        && isValidId(data.id)
+        && data.type is string && data.type.size() <= 16 && data.type in ['income', 'expense']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.amount is number && data.amount >= 0 && data.amount <= 1000000000000
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && data.date is string && data.date.size() >= 8 && data.date.size() <= 20
+        && data.paymentMethod is string && data.paymentMethod.size() <= 32 && data.paymentMethod in ['Bank Transfer', 'E-Wallet', 'Cash', 'Credit Card']
+        && data.walletType is string && data.walletType.size() <= 16 && data.walletType in ['cash', 'non_cash']
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() <= 120))
+        && (!('accountId' in data) || (data.accountId is string && data.accountId.size() <= 128))
+        && (!('relatedDebtId' in data) || (data.relatedDebtId is string && data.relatedDebtId.size() <= 128))
+        && (!('transferId' in data) || (data.transferId is string && data.transferId.size() <= 128))
+        && (!('transferType' in data) || (data.transferType is string && data.transferType.size() <= 32))
+        && (!('targetAccountId' in data) || (data.targetAccountId is string && data.targetAccountId.size() <= 128))
+        && (!('targetAccountName' in data) || (data.targetAccountName is string && data.targetAccountName.size() <= 120))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!('debitAccountCode' in data) || (data.debitAccountCode is string && data.debitAccountCode.size() <= 32))
+        && (!('debitAccountName' in data) || (data.debitAccountName is string && data.debitAccountName.size() <= 160))
+        && (!('creditAccountCode' in data) || (data.creditAccountCode is string && data.creditAccountCode.size() <= 32))
+        && (!('creditAccountName' in data) || (data.creditAccountName is string && data.creditAccountName.size() <= 160))
+        && (!('isAdjustment' in data) || data.isAdjustment is bool)
+        && (!('coaCode' in data) || (data.coaCode is string && data.coaCode.size() <= 32))
+        && (!('coaName' in data) || (data.coaName is string && data.coaName.size() <= 160))
+        && (!('isVoided' in data) || data.isVoided is bool)
+        && (!('voidedAt' in data) || (data.voidedAt is string && data.voidedAt.size() <= 64))
+        && (!('voidReason' in data) || (data.voidReason is string && data.voidReason.size() <= 300))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidDebtReceivable(data, userId, debtId) {
+      return data.keys().hasAll(['ownerId', 'id', 'debtorName', 'amount', 'amountPaid', 'dueDate', 'issuedDate', 'description', 'status', 'invoiceNumber', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'debtorName', 'debtorPhone', 'debtorEmail', 'amount', 'amountPaid', 'dueDate', 'issuedDate', 'description', 'status', 'invoiceNumber', 'sourceAccountId', 'sourceAccountName', 'deductFromAccount', 'disbursementTransactionId', 'qrImageDataUrl', 'notes', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == debtId
+        && isValidId(data.id)
+        && data.debtorName is string && data.debtorName.size() >= 1 && data.debtorName.size() <= 140
+        && (!('debtorPhone' in data) || (data.debtorPhone is string && data.debtorPhone.size() <= 32))
+        && (!('debtorEmail' in data) || (data.debtorEmail is string && data.debtorEmail.size() <= 254))
+        && data.amount is number && data.amount > 0 && data.amount <= 1000000000000
+        && data.amountPaid is number && data.amountPaid >= 0 && data.amountPaid <= data.amount
+        && data.dueDate is string && data.dueDate.size() >= 8 && data.dueDate.size() <= 20
+        && data.issuedDate is string && data.issuedDate.size() >= 8 && data.issuedDate.size() <= 20
+        && data.description is string && data.description.size() <= 500
+        && data.status is string && data.status.size() <= 16 && data.status in ['unpaid', 'partial', 'paid']
+        && data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 64
+        && (!('sourceAccountId' in data) || (data.sourceAccountId is string && data.sourceAccountId.size() <= 128))
+        && (!('sourceAccountName' in data) || (data.sourceAccountName is string && data.sourceAccountName.size() <= 120))
+        && (!('deductFromAccount' in data) || data.deductFromAccount is bool)
+        && (!('disbursementTransactionId' in data) || (data.disbursementTransactionId is string && data.disbursementTransactionId.size() <= 128))
+        && (!('qrImageDataUrl' in data) || (data.qrImageDataUrl is string && data.qrImageDataUrl.size() <= 250000))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidMyDebtLiability(data, userId, myDebtId) {
+      return data.keys().hasAll(['ownerId', 'id', 'creditorName', 'description', 'amount', 'amountPaid', 'dueDate', 'issuedDate', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'creditorName', 'description', 'amount', 'amountPaid', 'dueDate', 'issuedDate', 'status', 'sourceTransactionId', 'sourceAccountId', 'category', 'notes', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == myDebtId
+        && isValidId(data.id)
+        && data.creditorName is string && data.creditorName.size() >= 1 && data.creditorName.size() <= 140
+        && data.description is string && data.description.size() <= 500
+        && data.amount is number && data.amount > 0 && data.amount <= 1000000000000
+        && data.amountPaid is number && data.amountPaid >= 0 && data.amountPaid <= data.amount
+        && data.dueDate is string && data.dueDate.size() >= 8 && data.dueDate.size() <= 20
+        && data.issuedDate is string && data.issuedDate.size() >= 8 && data.issuedDate.size() <= 20
+        && data.status is string && data.status.size() <= 16 && data.status in ['unpaid', 'partial', 'paid']
+        && (!('sourceTransactionId' in data) || (data.sourceTransactionId is string && data.sourceTransactionId.size() <= 128))
+        && (!('sourceAccountId' in data) || (data.sourceAccountId is string && data.sourceAccountId.size() <= 128))
+        && (!('category' in data) || (data.category is string && data.category.size() <= 80))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidCategoryBudget(data, userId) {
+      return data.keys().hasAll(['ownerId', 'category', 'limit', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'category', 'limit', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && data.limit is number && data.limit >= 0 && data.limit <= 1000000000000
+        && hasValidTimestamps(data);
+    }
+
+    function isValidTodoItem(data, userId, todoId) {
+      return data.keys().hasAll(['ownerId', 'id', 'title', 'dueDate', 'priority', 'status', 'category', 'tags', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'description', 'dueDate', 'dueTime', 'priority', 'status', 'category', 'tags', 'subtasks', 'completedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == todoId
+        && isValidId(data.id)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && (!('description' in data) || (data.description is string && data.description.size() <= 2000))
+        && data.dueDate is string && data.dueDate.size() >= 8 && data.dueDate.size() <= 20
+        && (!('dueTime' in data) || (data.dueTime is string && data.dueTime.size() <= 16))
+        && data.priority is string && data.priority.size() <= 16 && data.priority in ['low', 'medium', 'high']
+        && data.status is string && data.status.size() <= 16 && data.status in ['pending', 'in_progress', 'completed']
+        && data.category is string && data.category.size() <= 80
+        && data.tags is list && data.tags.size() <= 25
+        && (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() <= 60))
+        && (!('subtasks' in data) || (data.subtasks is list && data.subtasks.size() <= 50 && (data.subtasks.size() == 0 || data.subtasks[0] is map)))
+        && (!('completedAt' in data) || (data.completedAt is string && data.completedAt.size() <= 32))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidNoteItem(data, userId, noteId) {
+      return data.keys().hasAll(['ownerId', 'id', 'title', 'content', 'category', 'tags', 'isPinned', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'content', 'category', 'tags', 'isPinned', 'clientCreatedAt', 'clientUpdatedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == noteId
+        && isValidId(data.id)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 240
+        && data.content is string && data.content.size() <= 100000
+        && data.category is string && data.category.size() <= 80
+        && data.tags is list && data.tags.size() <= 25
+        && (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() <= 60))
+        && data.isPinned is bool
+        && (!('clientCreatedAt' in data) || (data.clientCreatedAt is string && data.clientCreatedAt.size() <= 64))
+        && (!('clientUpdatedAt' in data) || (data.clientUpdatedAt is string && data.clientUpdatedAt.size() <= 64))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidHabitItem(data, userId, habitId) {
+      return data.keys().hasAll(['ownerId', 'id', 'title', 'targetPerWeek', 'completedDays', 'color', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'targetPerWeek', 'completedDays', 'color', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == habitId
+        && isValidId(data.id)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.targetPerWeek is number && data.targetPerWeek >= 1 && data.targetPerWeek <= 7
+        && data.completedDays is list && data.completedDays.size() <= 400
+        && (data.completedDays.size() == 0 || (data.completedDays[0] is string && data.completedDays[0].size() <= 20))
+        && data.color is string && data.color.size() <= 32
+        && hasValidTimestamps(data);
+    }
+
+    function isValidLogbookEntry(data, userId, entryId) {
+      return data.keys().hasAll(['ownerId', 'id', 'date', 'project', 'hours', 'category', 'description', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'date', 'project', 'hours', 'category', 'description', 'status', 'clientCreatedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == entryId
+        && isValidId(data.id)
+        && data.date is string && data.date.size() >= 8 && data.date.size() <= 20
+        && data.project is string && data.project.size() >= 1 && data.project.size() <= 160
+        && data.hours is number && data.hours >= 0 && data.hours <= 24
+        && data.category is string && data.category.size() <= 80
+        && data.description is string && data.description.size() <= 2000
+        && data.status is string && data.status.size() <= 24 && data.status in ['Completed', 'In Progress']
+        && (!('clientCreatedAt' in data) || (data.clientCreatedAt is string && data.clientCreatedAt.size() <= 64))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidSavedBarcode(data, userId, barcodeId) {
+      return data.keys().hasAll(['ownerId', 'id', 'type', 'text', 'title', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'type', 'text', 'title', 'dataUrl', 'clientCreatedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == barcodeId
+        && isValidId(data.id)
+        && data.type is string && data.type.size() <= 16 && data.type in ['qr', 'barcode']
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 2000
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && (!('dataUrl' in data) || (data.dataUrl is string && data.dataUrl.size() <= 250000))
+        && (!('clientCreatedAt' in data) || (data.clientCreatedAt is string && data.clientCreatedAt.size() <= 64))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidReimbursementItem(data, userId, reimburseId) {
+      return data.keys().hasAll(['ownerId', 'id', 'no', 'submissionDate', 'property', 'typeProject', 'role', 'startDate', 'endDate', 'wdDays', 'weDays', 'totalDays', 'description', 'wdRate', 'weRate', 'wdAmount', 'weAmount', 'totalAmount', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'no', 'submissionDate', 'property', 'typeProject', 'role', 'startDate', 'endDate', 'wdDays', 'weDays', 'totalDays', 'description', 'wdRate', 'weRate', 'wdAmount', 'weAmount', 'totalAmount', 'status', 'deliveryDate', 'paymentAccountId', 'selectedDates', 'notes', 'clientCreatedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == reimburseId
+        && isValidId(data.id)
+        && data.no is number && data.no >= 0 && data.no <= 1000000
+        && data.submissionDate is string && data.submissionDate.size() >= 8 && data.submissionDate.size() <= 20
+        && data.property is string && data.property.size() >= 1 && data.property.size() <= 200
+        && data.typeProject is string && data.typeProject.size() <= 16 && data.typeProject in ['Onsite', 'Online']
+        && data.role is string && data.role.size() <= 8 && data.role in ['M', 'TPM', 'PM']
+        && data.startDate is string && data.startDate.size() >= 8 && data.startDate.size() <= 20
+        && data.endDate is string && data.endDate.size() >= 8 && data.endDate.size() <= 20
+        && data.wdDays is number && data.wdDays >= 0 && data.wdDays <= 366
+        && data.weDays is number && data.weDays >= 0 && data.weDays <= 366
+        && data.totalDays is number && data.totalDays >= 0 && data.totalDays <= 366
+        && data.description is string && data.description.size() <= 500
+        && data.wdRate is number && data.wdRate >= 0 && data.wdRate <= 1000000000
+        && data.weRate is number && data.weRate >= 0 && data.weRate <= 1000000000
+        && data.wdAmount is number && data.wdAmount >= 0 && data.wdAmount <= 100000000000
+        && data.weAmount is number && data.weAmount >= 0 && data.weAmount <= 100000000000
+        && data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 100000000000
+        && data.status is string && data.status.size() <= 16 && data.status in ['Draft', 'Submitted', 'Approved', 'Done', 'Rejected']
+        && (!('deliveryDate' in data) || (data.deliveryDate is string && data.deliveryDate.size() <= 40))
+        && (!('paymentAccountId' in data) || (data.paymentAccountId is string && data.paymentAccountId.size() <= 128))
+        && (!('selectedDates' in data) || (data.selectedDates is list && data.selectedDates.size() <= 366 && (data.selectedDates.size() == 0 || (data.selectedDates[0] is string && data.selectedDates[0].size() <= 20))))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
+        && (!('clientCreatedAt' in data) || (data.clientCreatedAt is string && data.clientCreatedAt.size() <= 64))
+        && hasValidTimestamps(data);
+    }
+
+    function isValidReimburseRate(data, userId, rateId) {
+      return data.keys().hasAll(['ownerId', 'id', 'role', 'type', 'wdRate', 'weRate', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'role', 'type', 'wdRate', 'weRate', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.id == rateId
+        && isValidId(data.id)
+        && data.role is string && data.role.size() <= 8 && data.role in ['M', 'TPM', 'PM']
+        && data.type is string && data.type.size() <= 16 && data.type in ['Onsite', 'Online']
+        && data.wdRate is number && data.wdRate >= 0 && data.wdRate <= 1000000000
+        && data.weRate is number && data.weRate >= 0 && data.weRate <= 1000000000
+        && hasValidTimestamps(data);
+    }
+
+    // ==================== COLLECTION MATCH RULES ====================
+
+    // Master User Document (Root Anchor)
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId) && (resource == null || existing().ownerId == request.auth.uid);
+      allow list: if false;
+      allow create: if isEmailVerified()
+        && isValidId(userId)
+        && isValidUserRoot(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUserRoot(incoming(), userId)
+        && hasPreservedImmutableMetadata()
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'updatedAt']);
+      allow delete: if false;
+
+      // User Profile & Invoice Settings
+      match /profile/{profileId} {
+        allow get: if isOwner(userId) && isValidId(profileId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(profileId)
+          && isValidUserProfile(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(profileId)
+          && isValidUserProfile(incoming(), userId)
+          && hasPreservedImmutableMetadata()
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'title', 'avatarUrl', 'currencySymbol', 'monthlyBudget', 'bankAccountDetails', 'paymentQrDataUrl', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['paymentQrDataUrl', 'bankAccountDetails', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(profileId) && existing().ownerId == request.auth.uid;
+      }
+
+      // User Preferences & Initialization Flag
+      match /preferences/{prefId} {
+        allow get: if isOwner(userId) && isValidId(prefId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(prefId)
+          && isValidUserPreferences(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(prefId)
+          && isValidUserPreferences(incoming(), userId)
+          && hasPreservedImmutableMetadata()
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['theme', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['noteCategories', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['initialized', 'theme', 'noteCategories', 'updatedAt'])
+          );
+        allow delete: if false;
+      }
+
+      // Financial Accounts
+      match /accounts/{accountId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(accountId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(accountId)
+          && isValidFinancialAccount(incoming(), userId, accountId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(accountId)
+          && isValidFinancialAccount(incoming(), userId, accountId)
+          && hasPreservedImmutableMetadata()
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'type', 'initialBalance', 'accountNumber', 'color', 'coaCode', 'notes', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['initialBalance', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(accountId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Finance Transactions (Void is Terminal State)
+      match /transactions/{transactionId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(transactionId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(transactionId)
+          && isValidFinanceTransaction(incoming(), userId, transactionId)
+          && (!('isVoided' in incoming()) || incoming().isVoided == false)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(transactionId)
+          && isValidFinanceTransaction(incoming(), userId, transactionId)
+          && hasPreservedImmutableMetadata()
+          && (!('isVoided' in existing()) || existing().isVoided == false)
+          && (
+            (incoming().isVoided == true && incoming().diff(existing()).affectedKeys().hasOnly(['isVoided', 'voidedAt', 'voidReason', 'updatedAt'])) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'amount', 'category', 'date', 'paymentMethod', 'walletType', 'accountName', 'accountId', 'notes', 'coaCode', 'coaName', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(transactionId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Debts Receivable (Piutang Orang + Invoice + QR)
+      match /debts/{debtId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(debtId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(debtId)
+          && isValidDebtReceivable(incoming(), userId, debtId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(debtId)
+          && isValidDebtReceivable(incoming(), userId, debtId)
+          && hasPreservedImmutableMetadata()
+          && (
+            // Action: Record Payment
+            (incoming().amountPaid >= existing().amountPaid && incoming().diff(existing()).affectedKeys().hasOnly(['amountPaid', 'status', 'updatedAt'])) ||
+            // Action: Increase Debt / Add Nominal
+            (incoming().amount > existing().amount && incoming().diff(existing()).affectedKeys().hasOnly(['amount', 'status', 'description', 'dueDate', 'notes', 'updatedAt'])) ||
+            // Action: Update Phone / Contact / Invoice QR
+            incoming().diff(existing()).affectedKeys().hasOnly(['debtorName', 'debtorPhone', 'debtorEmail', 'dueDate', 'description', 'qrImageDataUrl', 'notes', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(debtId) && existing().ownerId == request.auth.uid;
+      }
+
+      // My Debt Liabilities (Hutang Saya)
+      match /myDebts/{myDebtId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(myDebtId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(myDebtId)
+          && isValidMyDebtLiability(incoming(), userId, myDebtId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(myDebtId)
+          && isValidMyDebtLiability(incoming(), userId, myDebtId)
+          && hasPreservedImmutableMetadata()
+          && existing().status != 'paid'
+          && (
+            (incoming().amountPaid >= existing().amountPaid && incoming().diff(existing()).affectedKeys().hasOnly(['amountPaid', 'status', 'updatedAt'])) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['creditorName', 'description', 'amount', 'dueDate', 'category', 'notes', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(myDebtId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Category Budgets
+      match /categoryBudgets/{budgetId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(budgetId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(budgetId)
+          && isValidCategoryBudget(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(budgetId)
+          && isValidCategoryBudget(incoming(), userId)
+          && hasPreservedImmutableMetadata()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['limit', 'category', 'updatedAt']);
+        allow delete: if isMasterUserOwner(userId) && isValidId(budgetId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Todos
+      match /todos/{todoId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(todoId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(todoId)
+          && isValidTodoItem(incoming(), userId, todoId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(todoId)
+          && isValidTodoItem(incoming(), userId, todoId)
+          && hasPreservedImmutableMetadata()
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAt', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['subtasks', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'dueDate', 'dueTime', 'priority', 'status', 'category', 'tags', 'subtasks', 'completedAt', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(todoId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Notes
+      match /notes/{noteId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(noteId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(noteId)
+          && isValidNoteItem(incoming(), userId, noteId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(noteId)
+          && isValidNoteItem(incoming(), userId, noteId)
+          && hasPreservedImmutableMetadata()
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['isPinned', 'clientUpdatedAt', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'category', 'tags', 'isPinned', 'clientUpdatedAt', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(noteId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Habits
+      match /habits/{habitId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(habitId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(habitId)
+          && isValidHabitItem(incoming(), userId, habitId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(habitId)
+          && isValidHabitItem(incoming(), userId, habitId)
+          && hasPreservedImmutableMetadata()
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['completedDays', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'targetPerWeek', 'color', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(habitId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Work Logbook
+      match /logbook/{entryId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(entryId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(entryId)
+          && isValidLogbookEntry(incoming(), userId, entryId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(entryId)
+          && isValidLogbookEntry(incoming(), userId, entryId)
+          && hasPreservedImmutableMetadata()
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['date', 'project', 'hours', 'category', 'description', 'status', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(entryId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Saved QR & Barcodes
+      match /barcodes/{barcodeId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(barcodeId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(barcodeId)
+          && isValidSavedBarcode(incoming(), userId, barcodeId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(barcodeId)
+          && isValidSavedBarcode(incoming(), userId, barcodeId)
+          && hasPreservedImmutableMetadata()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'text', 'dataUrl', 'updatedAt']);
+        allow delete: if isMasterUserOwner(userId) && isValidId(barcodeId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Reimbursements (Done & Rejected are Terminal States)
+      match /reimbursements/{reimburseId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(reimburseId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(reimburseId)
+          && isValidReimbursementItem(incoming(), userId, reimburseId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(reimburseId)
+          && isValidReimbursementItem(incoming(), userId, reimburseId)
+          && hasPreservedImmutableMetadata()
+          && !(existing().status in ['Done', 'Rejected'])
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'deliveryDate', 'paymentAccountId', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['submissionDate', 'property', 'typeProject', 'role', 'startDate', 'endDate', 'wdDays', 'weDays', 'totalDays', 'description', 'wdRate', 'weRate', 'wdAmount', 'weAmount', 'totalAmount', 'selectedDates', 'notes', 'updatedAt'])
+          );
+        allow delete: if isMasterUserOwner(userId) && isValidId(reimburseId) && existing().ownerId == request.auth.uid;
+      }
+
+      // Reimbursement Rate Matrix
+      match /reimburseRates/{rateId} {
+        allow get: if isMasterUserOwner(userId) && isValidId(rateId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isMasterUserOwner(userId)
+          && isValidId(rateId)
+          && isValidReimburseRate(incoming(), userId, rateId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isMasterUserOwner(userId)
+          && isValidId(rateId)
+          && isValidReimburseRate(incoming(), userId, rateId)
+          && hasPreservedImmutableMetadata()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['wdRate', 'weRate', 'role', 'type', 'updatedAt']);
+        allow delete: if isMasterUserOwner(userId) && isValidId(rateId) && existing().ownerId == request.auth.uid;
+      }
+    }
+  }
+}

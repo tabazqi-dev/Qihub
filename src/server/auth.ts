@@ -1,0 +1,32 @@
+import type { Request, Response, NextFunction } from 'express';
+import type { DecodedIdToken } from 'firebase-admin/auth';
+import { adminAuth } from './firebase-admin.ts';
+
+export interface AuthRequest extends Request {
+  user?: DecodedIdToken;
+}
+
+export const requireAuth = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing token' });
+  }
+
+  const token = authHeader.slice('Bearer '.length).trim();
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: Empty token' });
+  }
+
+  try {
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    req.user = decodedToken;
+    return next();
+  } catch (error) {
+    console.error('Error verifying Firebase ID token:', error instanceof Error ? error.message : 'Invalid token');
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
+};

@@ -8,7 +8,6 @@ import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/common/Sidebar';
 import { Header } from './components/common/Header';
 import { ToastContainer } from './components/common/Toast';
-import { QuickAddModal } from './components/common/QuickAddModal';
 import { SearchModal } from './components/common/SearchModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 
@@ -22,7 +21,9 @@ import { NotesKnowledgeView } from './components/notes/NotesKnowledgeView';
 import { PdfToolsView } from './components/pdf/PdfToolsView';
 import { BarcodeQrView } from './components/barcode/BarcodeQrView';
 import { FocusTimerView } from './components/focus/FocusTimerView';
+import { LogbookView } from './components/logbook/LogbookView';
 import { ArchitectureGuideModal } from './components/docs/ArchitectureGuideModal';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 // Icons for Mobile Bottom Nav
 import { LayoutDashboard, CalendarCheck, Wallet, FileText, FileType, QrCode } from 'lucide-react';
@@ -33,7 +34,6 @@ const MainShell: React.FC = () => {
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -41,7 +41,7 @@ const MainShell: React.FC = () => {
   const renderActiveView = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <DashboardView onOpenQuickAdd={() => setIsQuickAddOpen(true)} />;
+        return <DashboardView />;
       case 'todos':
         return <TodoCalendarView />;
       case 'finance':
@@ -58,10 +58,12 @@ const MainShell: React.FC = () => {
         return <BarcodeQrView />;
       case 'focus':
         return <FocusTimerView />;
+      case 'logbook':
+        return <LogbookView />;
       case 'architecture':
         return <ArchitectureGuideModal />;
       default:
-        return <DashboardView onOpenQuickAdd={() => setIsQuickAddOpen(true)} />;
+        return <DashboardView />;
     }
   };
 
@@ -89,7 +91,6 @@ const MainShell: React.FC = () => {
         <div className="flex-1 flex flex-col min-w-0">
           <Header
             onToggleMobileSidebar={() => setIsMobileSidebarOpen(true)}
-            onOpenQuickAdd={() => setIsQuickAddOpen(true)}
             onOpenSearch={() => setIsSearchOpen(true)}
           />
 
@@ -122,11 +123,6 @@ const MainShell: React.FC = () => {
       </nav>
 
       {/* Modals & Overlays */}
-      <QuickAddModal
-        isOpen={isQuickAddOpen}
-        onClose={() => setIsQuickAddOpen(false)}
-      />
-
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -145,8 +141,10 @@ const MainShell: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <MainShell />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <MainShell />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

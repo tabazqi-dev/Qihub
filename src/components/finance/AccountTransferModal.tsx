@@ -71,7 +71,7 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
 
   // Calculate live balance for an account
   const getAccountLiveBalance = (acc: FinancialAccount) => {
-    const accTxs = transactions.filter(t => t.accountId === acc.id || t.accountName === acc.name);
+    const accTxs = transactions.filter(t => !t.isVoided && (t.accountId === acc.id || t.accountName === acc.name));
     const income = accTxs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const expense = accTxs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     return acc.initialBalance + income - expense;
@@ -463,9 +463,31 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
 
             {/* Tanggal Transaksi */}
             <div className="space-y-1.5">
-              <label htmlFor={dateFieldId} className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                Tanggal Transaksi
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor={dateFieldId} className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  Tanggal Transaksi (Support Back Date)
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setDate(new Date().toISOString().split('T')[0])}
+                    className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 cursor-pointer"
+                  >
+                    Hari Ini
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      setDate(d.toISOString().split('T')[0]);
+                    }}
+                    className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[10px] font-medium text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 cursor-pointer"
+                  >
+                    Kemarin
+                  </button>
+                </div>
+              </div>
               <input
                 id={dateFieldId}
                 type="date"

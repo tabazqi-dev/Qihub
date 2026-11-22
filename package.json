@@ -4,14 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "start": "tsx server.ts"
+    "start": "NODE_ENV=production tsx server.ts",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@google/genai": "^2.4.0",
     "@imgly/background-removal": "^1.7.0",
     "@mediapipe/selfie_segmentation": "^0.1.1675465747",
@@ -31,10 +33,12 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.5.438",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "serverless-http": "^4.0.0",
     "vite": "^8.3.0"
   },
   "devDependencies": {

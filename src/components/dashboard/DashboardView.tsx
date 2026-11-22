@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { 
   CheckCircle2, 
@@ -16,15 +16,32 @@ import {
   Sparkles,
   Flame,
   FileText,
-  ArrowLeftRight
+  ArrowLeftRight,
+  ClipboardList
 } from 'lucide-react';
 
 interface DashboardViewProps {
-  onOpenQuickAdd: () => void;
+  // no props needed
 }
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAdd }) => {
-  const { profile, todos, transactions, notes, habits, toggleHabitDay, toggleTodoStatus, setActiveTab } = useApp();
+export const DashboardView: React.FC<DashboardViewProps> = () => {
+  const { profile, todos, transactions, notes, habits, toggleHabitDay, toggleTodoStatus, setActiveTab, addLogbookEntry } = useApp();
+
+  const [dashLogDesc, setDashLogDesc] = useState('');
+
+  const handleDashLogSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dashLogDesc.trim()) return;
+    addLogbookEntry({
+      date: new Date().toLocaleDateString('en-CA'),
+      project: 'Daily Log',
+      hours: 0,
+      category: 'Daily',
+      description: dashLogDesc.trim(),
+      status: 'Completed'
+    });
+    setDashLogDesc('');
+  };
 
   // Dynamic greeting based on current local hour
   const getGreeting = () => {
@@ -42,17 +59,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAdd }) 
   const completedTodos = todos.filter(t => t.status === 'completed');
   const completionRate = todos.length > 0 ? Math.round((completedTodos.length / todos.length) * 100) : 0;
 
-  // Finance calculations
-  const totalIncome = transactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const activeTransactions = transactions.filter(t => !t.isVoided);
 
   // Multi-Account Finance calculations
   const { debts, accounts, myDebts } = useApp();
 
   const getAccountBalance = (accId: string, initial: number) => {
-    const inc = transactions.filter(t => t.accountId === accId && t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const exp = transactions.filter(t => t.accountId === accId && t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const inc = activeTransactions.filter(t => t.accountId === accId && t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const exp = activeTransactions.filter(t => t.accountId === accId && t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     return initial + inc - exp;
   };
 
@@ -71,7 +85,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAdd }) 
   // If accounts exist, use their exact real-world current balance sum
   const totalCombinedBalance = accounts.length > 0 
     ? accounts.reduce((sum, a) => sum + getAccountBalance(a.id, a.initialBalance), 0)
-    : (transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0) - transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
+    : (activeTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0) - activeTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
 
   const totalUnpaidDebts = debts
     .filter(d => d.status !== 'paid')
@@ -105,15 +119,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAdd }) 
 
           <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={onOpenQuickAdd}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-neutral-900 hover:bg-neutral-100 text-xs font-semibold shadow-sm transition-all hover:scale-102 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Entri Cepat Baru</span>
-            </button>
-            <button
               onClick={() => setActiveTab('finance')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-200 text-xs font-semibold border border-neutral-700 transition-all cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-neutral-100 text-neutral-900 text-xs font-semibold shadow-sm transition-all cursor-pointer"
             >
               <span>Cek Saldo Harian</span>
             </button>
@@ -527,7 +534,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAdd }) 
             </div>
 
             <div className="space-y-2">
-              {transactions.slice(0, 3).map((tx) => {
+              {transactions.filter(t => !t.isVoided).slice(0, 3).map((tx) => {
                 const isIncome = tx.type === 'income';
 
                 return (
@@ -555,6 +562,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAdd }) 
                 );
               })}
             </div>
+          </div>
+
+          {/* Quick Logbook Input Section */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 text-indigo-500" />
+                <span>Input Cepat Logbook Kerja</span>
+              </h2>
+              <button
+                onClick={() => setActiveTab('logbook')}
+                className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+              >
+                Lihat Semua
+              </button>
+            </div>
+
+            <form onSubmit={handleDashLogSubmit} className="space-y-3">
+              <textarea
+                rows={3}
+                maxLength={2000}
+                required
+                value={dashLogDesc}
+                onChange={(e) => setDashLogDesc(e.target.value)}
+                placeholder="Apa saja yang Anda kerjakan hari ini?"
+                className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100 resize-none font-sans leading-relaxed"
+              />
+              <button
+                type="submit"
+                className="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition-colors cursor-pointer"
+              >
+                Catat Log Hari Ini
+              </button>
+            </form>
           </div>
         </div>
       </div>

@@ -1,7 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import { PDFDocument, rgb } from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useApp } from '../../context/AppContext';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 import { 
   FileType, 
   Upload, 
@@ -92,16 +96,19 @@ export const PdfToolsView: React.FC = () => {
   const [typedFont, setTypedFont] = useState<string>('cursive');
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   
-  // Signature position & attributes
+  // Signature position & attributes (percentage of PDF page top-left for exact WYSIWYG drag)
   const [sigPositionPreset, setSigPositionPreset] = useState<'bottom-right' | 'bottom-left' | 'bottom-center' | 'custom'>('bottom-right');
-  const [sigCoordX, setSigCoordX] = useState<number>(70); // percentage 0-100
-  const [sigCoordY, setSigCoordY] = useState<number>(85); // percentage 0-100
-  const [sigScale, setSigScale] = useState<number>(45); // width in mm approx
+  const [sigCoordX, setSigCoordX] = useState<number>(68); // percentage 0-100 of page width
+  const [sigCoordY, setSigCoordY] = useState<number>(80); // percentage 0-100 of page height
+  const [sigScale, setSigScale] = useState<number>(45); // width in mm approx (relative to 210mm A4)
+  const [sigAspectRatio, setSigAspectRatio] = useState<number>(520 / 160);
   const [includeDateStamp, setIncludeDateStamp] = useState<boolean>(true);
   const [includeNameStamp, setIncludeNameStamp] = useState<boolean>(true);
   const [signerLocation, setSignerLocation] = useState<string>('Jakarta, Indonesia');
   const [isSigning, setIsSigning] = useState<boolean>(false);
   const [signedResultUrl, setSignedResultUrl] = useState<string | null>(null);
+  const [isRenderingPreview, setIsRenderingPreview] = useState<boolean>(false);
+  const [previewDimensions, setPreviewDimensions] = useState<{ width: number; height: number }>({ width: 595, height: 842 });
 
   // ================= 5. SPLIT PDF STATES =================
   const [splitFile, setSplitFile] = useState<File | null>(null);
@@ -131,7 +138,68 @@ export const PdfToolsView: React.FC = () => {
   const signUploadInputRef = useRef<HTMLInputElement>(null);
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingSigRef = useRef<boolean>(false);
+  const pdfPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const pdfPreviewContainerRef = useRef<HTMLDivElement>(null);
+  const isDraggingSigRef = useRef<boolean>(false);
+  const dragStartOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const splitFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Track exact natural aspect ratio whenever signatureDataUrl updates
+  useEffect(() => {
+    if (!signatureDataUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      if (img.width > 0 && img.height > 0) {
+        setSigAspectRatio(img.width / img.height);
+      }
+    };
+    img.src = signatureDataUrl;
+  }, [signatureDataUrl]);
+
+  // Render live PDF page onto preview canvas using pdfjs-dist
+  useEffect(() => {
+    if (activeSubTab !== 'sign-pdf' || !signPdfBytes) return;
+    let cancelled = false;
+    let renderTask: { cancel?: () => void } | null = null;
+
+    const renderPage = async () => {
+      setIsRenderingPreview(true);
+      try {
+        const loadingTask = pdfjsLib.getDocument({ data: signPdfBytes.slice() });
+        const pdf = await loadingTask.promise;
+        if (cancelled) return;
+        const pageNum = Math.min(Math.max(1, targetPageNumber), pdf.numPages);
+        const page = await pdf.getPage(pageNum);
+        if (cancelled) return;
+
+        const baseViewport = page.getViewport({ scale: 1.5 });
+        const canvas = pdfPreviewCanvasRef.current;
+        if (!canvas) return;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+
+        canvas.width = baseViewport.width;
+        canvas.height = baseViewport.height;
+        setPreviewDimensions({ width: baseViewport.width, height: baseViewport.height });
+
+        const task = page.render({ canvasContext: context, viewport: baseViewport, canvas });
+        renderTask = task;
+        await task.promise;
+      } catch (err) {
+        if (!cancelled) {
+          console.error('PDF preview render error:', err);
+        }
+      } finally {
+        if (!cancelled) setIsRenderingPreview(false);
+      }
+    };
+
+    void renderPage();
+    return () => {
+      cancelled = true;
+      renderTask?.cancel?.();
+    };
+  }, [activeSubTab, signPdfBytes, targetPageNumber]);
 
   // ================= INITIALIZE SIGNATURE DRAWING =================
   useEffect(() => {
@@ -186,16 +254,25 @@ export const PdfToolsView: React.FC = () => {
     setSignatureDataUrl(data);
   };
 
-  // Canvas drawing handlers for signature
-  const handleSigMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Pointer drawing handlers for signature (supports both mouse and touch screens)
+  const getCanvasPoint = (e: React.PointerEvent<HTMLCanvasElement>, canvas: HTMLCanvasElement) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const handleSigPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = signatureCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const { x, y } = getCanvasPoint(e, canvas);
 
     isDrawingSigRef.current = true;
     ctx.beginPath();
@@ -208,28 +285,87 @@ export const PdfToolsView: React.FC = () => {
     ctx.lineJoin = 'round';
   };
 
-  const handleSigMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleSigPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawingSigRef.current) return;
     const canvas = signatureCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
+    const { x, y } = getCanvasPoint(e, canvas);
     ctx.lineTo(x, y);
     ctx.stroke();
   };
 
-  const handleSigMouseUp = () => {
+  const handleSigPointerUp = () => {
     if (!isDrawingSigRef.current) return;
     isDrawingSigRef.current = false;
     const canvas = signatureCanvasRef.current;
     if (canvas) {
       setSignatureDataUrl(canvas.toDataURL('image/png'));
     }
+  };
+
+  // Drag-and-drop handlers for positioning signature directly over PDF Preview
+  const sigWidthPct = Math.min(48, Math.max(10, (sigScale / 210) * 100));
+
+  const applyPresetPosition = (preset: 'bottom-right' | 'bottom-left' | 'bottom-center' | 'custom') => {
+    setSigPositionPreset(preset);
+    if (preset === 'bottom-right') {
+      setSigCoordX(Math.max(4, Math.round(100 - sigWidthPct - 6)));
+      setSigCoordY(78);
+    } else if (preset === 'bottom-left') {
+      setSigCoordX(6);
+      setSigCoordY(78);
+    } else if (preset === 'bottom-center') {
+      setSigCoordX(Math.max(4, Math.round((100 - sigWidthPct) / 2)));
+      setSigCoordY(78);
+    }
+  };
+
+  const handleOverlayPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const container = pdfPreviewContainerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const boxLeftPx = (sigCoordX / 100) * rect.width;
+    const boxTopPx = (sigCoordY / 100) * rect.height;
+
+    dragStartOffsetRef.current = {
+      dx: e.clientX - (rect.left + boxLeftPx),
+      dy: e.clientY - (rect.top + boxTopPx)
+    };
+    isDraggingSigRef.current = true;
+    setSigPositionPreset('custom');
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleOverlayPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingSigRef.current) return;
+    const container = pdfPreviewContainerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const newLeftPx = e.clientX - rect.left - dragStartOffsetRef.current.dx;
+    const newTopPx = e.clientY - rect.top - dragStartOffsetRef.current.dy;
+
+    const boxWidthPx = (sigWidthPct / 100) * rect.width;
+    const boxHeightPx = boxWidthPx / (sigAspectRatio || 2.5);
+
+    const maxX = Math.max(0, 100 - sigWidthPct);
+    const maxY = Math.max(0, 100 - (boxHeightPx / rect.height) * 100);
+
+    const clampedX = Math.min(maxX, Math.max(0, (newLeftPx / rect.width) * 100));
+    const clampedY = Math.min(maxY, Math.max(0, (newTopPx / rect.height) * 100));
+
+    setSigCoordX(Math.round(clampedX * 10) / 10);
+    setSigCoordY(Math.round(clampedY * 10) / 10);
+  };
+
+  const handleOverlayPointerUp = () => {
+    isDraggingSigRef.current = false;
   };
 
   const clearSignatureCanvas = () => {
@@ -301,35 +437,39 @@ export const PdfToolsView: React.FC = () => {
       const page = pages[pageIndex];
       const { width: pageWidth, height: pageHeight } = page.getSize();
 
-      // Embed signature PNG
-      const pngImage = await pdfDoc.embedPng(signatureDataUrl);
-      const pngDims = pngImage.scale(0.35 * (sigScale / 45));
+      // Embed signature image (supports PNG or JPG upload converted cleanly)
+      const isPng = signatureDataUrl.startsWith('data:image/png');
+      const embeddedImage = isPng
+        ? await pdfDoc.embedPng(signatureDataUrl)
+        : await pdfDoc.embedJpg(signatureDataUrl);
 
-      // Calculate position based on preset or custom coordinates
-      let x = 0;
-      let y = 0;
+      const drawWidth = pageWidth * (sigWidthPct / 100);
+      const drawHeight = drawWidth * (embeddedImage.height / embeddedImage.width);
+
+      // Compute exact PDF-lib bottom-left coordinates matching the live interactive preview
+      let x = (sigCoordX / 100) * pageWidth;
+      let y = pageHeight - (sigCoordY / 100) * pageHeight - drawHeight;
 
       if (sigPositionPreset === 'bottom-right') {
-        x = pageWidth - pngDims.width - 40;
+        x = pageWidth - drawWidth - 40;
         y = 50;
       } else if (sigPositionPreset === 'bottom-left') {
         x = 40;
         y = 50;
       } else if (sigPositionPreset === 'bottom-center') {
-        x = (pageWidth - pngDims.width) / 2;
+        x = (pageWidth - drawWidth) / 2;
         y = 50;
-      } else {
-        // Custom coordinates (percentage)
-        x = (sigCoordX / 100) * (pageWidth - pngDims.width);
-        y = pageHeight - (sigCoordY / 100) * pageHeight - pngDims.height;
       }
 
+      x = Math.min(Math.max(4, x), Math.max(4, pageWidth - drawWidth - 4));
+      y = Math.min(Math.max(18, y), Math.max(18, pageHeight - drawHeight - 4));
+
       // Draw signature image
-      page.drawImage(pngImage, {
+      page.drawImage(embeddedImage, {
         x,
         y,
-        width: pngDims.width,
-        height: pngDims.height,
+        width: drawWidth,
+        height: drawHeight,
       });
 
       // Draw optional text stamp (Signer name, Date, Location)
@@ -344,7 +484,7 @@ export const PdfToolsView: React.FC = () => {
 
         if (includeNameStamp) {
           page.drawText(`(${typedName || profile.name})`, {
-            x: x + (pngDims.width / 2) - 40,
+            x: Math.max(8, x + (drawWidth / 2) - 40),
             y: textY,
             size: 9,
             color: rgb(0.1, 0.15, 0.2),
@@ -354,7 +494,7 @@ export const PdfToolsView: React.FC = () => {
 
         if (includeDateStamp) {
           page.drawText(`Ditandatangani secara digital pada ${todayStr} • ${signerLocation}`, {
-            x: x + (pngDims.width / 2) - 75,
+            x: Math.max(8, x + (drawWidth / 2) - 75),
             y: textY,
             size: 7,
             color: rgb(0.4, 0.45, 0.5),
@@ -1558,10 +1698,10 @@ export const PdfToolsView: React.FC = () => {
                       ref={signatureCanvasRef}
                       width={520}
                       height={160}
-                      onMouseDown={handleSigMouseDown}
-                      onMouseMove={handleSigMouseMove}
-                      onMouseUp={handleSigMouseUp}
-                      onMouseLeave={handleSigMouseUp}
+                      onPointerDown={handleSigPointerDown}
+                      onPointerMove={handleSigPointerMove}
+                      onPointerUp={handleSigPointerUp}
+                      onPointerCancel={handleSigPointerUp}
                       className="w-full h-40 cursor-crosshair"
                     />
                   </div>
@@ -1628,38 +1768,107 @@ export const PdfToolsView: React.FC = () => {
             </div>
           </div>
 
-          {/* Right Column (5 cols): Placement & Signature Stamping */}
+          {/* Right Column (5 cols): Interactive Drag-and-Drop PDF Preview & Placement */}
           <div className="lg:col-span-5 space-y-4">
             <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center font-bold text-xs">
-                  3
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center font-bold text-xs">
+                    3
+                  </div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
+                    Preview PDF & Posisi Geser Bebas
+                  </h3>
                 </div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
-                  Posisi & Metadata Cap
-                </h3>
+                {signFile && (
+                  <span className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold">
+                    X: {Math.round(sigCoordX)}% • Y: {Math.round(sigCoordY)}%
+                  </span>
+                )}
               </div>
 
-              {/* Position Presets */}
+              {/* Interactive Live PDF Canvas Preview + Draggable Signature Box */}
+              {signFile ? (
+                <div className="space-y-2">
+                  <div
+                    ref={pdfPreviewContainerRef}
+                    className="relative w-full rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-950 shadow-inner select-none touch-none"
+                    style={{ aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}` }}
+                  >
+                    <canvas
+                      ref={pdfPreviewCanvasRef}
+                      className="w-full h-full block bg-white"
+                    />
+
+                    {isRenderingPreview && (
+                      <div className="absolute inset-0 bg-white/75 dark:bg-neutral-900/75 flex items-center justify-center text-xs font-semibold text-neutral-500">
+                        Merender halaman {targetPageNumber}...
+                      </div>
+                    )}
+
+                    {/* Draggable Signature Box */}
+                    {signatureDataUrl ? (
+                      <div
+                        onPointerDown={handleOverlayPointerDown}
+                        onPointerMove={handleOverlayPointerMove}
+                        onPointerUp={handleOverlayPointerUp}
+                        onPointerCancel={handleOverlayPointerUp}
+                        style={{
+                          left: `${sigCoordX}%`,
+                          top: `${sigCoordY}%`,
+                          width: `${sigWidthPct}%`
+                        }}
+                        className="absolute cursor-grab active:cursor-grabbing border-2 border-dashed border-indigo-500 bg-indigo-500/10 hover:bg-indigo-500/15 rounded-md p-0.5 flex flex-col items-center group"
+                        title="Klik dan seret tanda tangan ke posisi mana pun di halaman PDF"
+                      >
+                        <img
+                          src={signatureDataUrl}
+                          alt="Draggable Signature"
+                          draggable={false}
+                          className="w-full h-auto pointer-events-none select-none"
+                        />
+                        {includeNameStamp && (
+                          <span className="text-[8px] leading-tight text-neutral-800 font-semibold truncate max-w-full pointer-events-none">
+                            ({typedName || profile.name})
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="absolute bottom-3 inset-x-3 py-1.5 px-2.5 rounded-lg bg-neutral-900/80 text-white text-[11px] text-center pointer-events-none">
+                        Buat tanda tangan di Langkah 2 agar bisa digeser langsung di preview ini
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-neutral-400 text-center">
+                    Geser kotak tanda tangan langsung di atas dokumen ke posisi mana pun sesuka Anda.
+                  </p>
+                </div>
+              ) : (
+                <div className="py-10 px-4 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/30 text-center text-xs text-neutral-400">
+                  Unggah dokumen PDF di Langkah 1 untuk melihat pratinjau live dan menggeser posisi tanda tangan.
+                </div>
+              )}
+
+              {/* Quick Position Presets */}
               <div>
                 <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
-                  Preset Posisi Tanda Tangan
+                  Preset Cepat atau Geser Bebas
                 </label>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <button
                     type="button"
-                    onClick={() => setSigPositionPreset('bottom-right')}
+                    onClick={() => applyPresetPosition('bottom-right')}
                     className={`p-2 rounded-lg border text-center transition-all cursor-pointer ${
                       sigPositionPreset === 'bottom-right'
                         ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20 font-bold text-indigo-600 dark:text-indigo-400'
                         : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
                     }`}
                   >
-                    Bawah Kanan (Standar)
+                    Bawah Kanan
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSigPositionPreset('bottom-left')}
+                    onClick={() => applyPresetPosition('bottom-left')}
                     className={`p-2 rounded-lg border text-center transition-all cursor-pointer ${
                       sigPositionPreset === 'bottom-left'
                         ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20 font-bold text-indigo-600 dark:text-indigo-400'
@@ -1670,7 +1879,7 @@ export const PdfToolsView: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSigPositionPreset('bottom-center')}
+                    onClick={() => applyPresetPosition('bottom-center')}
                     className={`p-2 rounded-lg border text-center transition-all cursor-pointer ${
                       sigPositionPreset === 'bottom-center'
                         ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20 font-bold text-indigo-600 dark:text-indigo-400'
@@ -1681,14 +1890,14 @@ export const PdfToolsView: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSigPositionPreset('custom')}
+                    onClick={() => applyPresetPosition('custom')}
                     className={`p-2 rounded-lg border text-center transition-all cursor-pointer ${
                       sigPositionPreset === 'custom'
                         ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20 font-bold text-indigo-600 dark:text-indigo-400'
                         : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
                     }`}
                   >
-                    Koordinat Bebas
+                    Bebas (Drag Preview)
                   </button>
                 </div>
               </div>

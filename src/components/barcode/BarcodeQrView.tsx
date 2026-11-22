@@ -15,15 +15,45 @@ import {
   Sliders, 
   FileCode,
   ScanLine,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 
 export const BarcodeQrView: React.FC = () => {
-  const { showToast } = useApp();
-  const [activeTab, setActiveTab] = useState<'qr' | 'barcode' | 'scanner'>('qr');
+  const { showToast, savedBarcodes, addSavedBarcode, deleteSavedBarcode } = useApp();
+  const [activeTab, setActiveTab] = useState<'qr' | 'barcode' | 'scanner' | 'history'>('qr');
+
+  const [qrTitle, setQrTitle] = useState('');
+  const [bcTitle, setBcTitle] = useState('');
+
+  const handleSaveQrToSystem = () => {
+    if (!qrText || !qrDataUrl) return;
+    const defaultTitle = qrText.length > 36 ? qrText.substring(0, 36) + '...' : qrText;
+    addSavedBarcode({
+      type: 'qr',
+      text: qrText,
+      title: qrTitle.trim() || defaultTitle,
+      dataUrl: qrDataUrl
+    });
+    setQrTitle('');
+  };
+
+  const handleSaveBarcodeToSystem = () => {
+    if (!bcText || !barcodeSvgRef.current) return;
+    const serializer = new XMLSerializer();
+    const source = serializer.serializeToString(barcodeSvgRef.current);
+    const dataUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(source)));
+    addSavedBarcode({
+      type: 'barcode',
+      text: bcText,
+      title: bcTitle.trim() || `Barcode [${bcFormat}] ${bcText}`,
+      dataUrl
+    });
+    setBcTitle('');
+  };
 
   // QR Code State
-  const [qrText, setQrText] = useState('https://omnihub.app/welcome');
+  const [qrText, setQrText] = useState('https://qhub.app/welcome');
   const [qrFgColor, setQrFgColor] = useState('#171717');
   const [qrBgColor, setQrBgColor] = useState('#ffffff');
   const [qrSize, setQrSize] = useState(256);
@@ -32,7 +62,7 @@ export const BarcodeQrView: React.FC = () => {
   const [qrSvgString, setQrSvgString] = useState('');
 
   // Barcode State
-  const [bcText, setBcText] = useState('OMNI-9824-712');
+  const [bcText, setBcText] = useState('QHUB-9824-712');
   const [bcFormat, setBcFormat] = useState<'CODE128' | 'EAN13' | 'pharmacode' | 'CODE39'>('CODE128');
   const [bcLineColor, setBcLineColor] = useState('#171717');
   const [bcBgColor, setBcBgColor] = useState('#ffffff');
@@ -43,7 +73,6 @@ export const BarcodeQrView: React.FC = () => {
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const scannerCanvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
 
   // Generate QR Code on state changes
@@ -268,6 +297,16 @@ export const BarcodeQrView: React.FC = () => {
           >
             Reader / Scanner
           </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              activeTab === 'history'
+                ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
+            }`}
+          >
+            Riwayat ({savedBarcodes.length})
+          </button>
         </div>
       </div>
 
@@ -281,17 +320,31 @@ export const BarcodeQrView: React.FC = () => {
                 Konten QR Code
               </h3>
 
-              <div>
-                <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
-                  Teks atau URL Target
-                </label>
-                <textarea
-                  rows={3}
-                  value={qrText}
-                  onChange={(e) => setQrText(e.target.value)}
-                  placeholder="Ketik URL (https://...), teks, email, atau WiFi..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100 font-mono"
-                />
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
+                    Nama / Label QR Code (Opsional, untuk Daftar Riwayat)
+                  </label>
+                  <input
+                    type="text"
+                    value={qrTitle}
+                    onChange={(e) => setQrTitle(e.target.value)}
+                    placeholder="Contoh: QR Pembayaran BCA, Link Menu Kafe, WiFi Kantor..."
+                    className="w-full px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
+                    Teks atau URL Target
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={qrText}
+                    onChange={(e) => setQrText(e.target.value)}
+                    placeholder="Ketik URL (https://...), teks, email, atau WiFi..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100 font-mono"
+                  />
+                </div>
               </div>
 
               {/* Presets */}
@@ -424,23 +477,32 @@ export const BarcodeQrView: React.FC = () => {
                 {qrText}
               </p>
 
-              {/* Download Buttons */}
-              <div className="w-full grid grid-cols-2 gap-3 mt-6">
+              {/* Download & Save Buttons */}
+              <div className="w-full space-y-2 mt-6">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={downloadQrPng}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-100 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadQrSvg}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-semibold text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer"
+                  >
+                    <FileCode className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>SVG</span>
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={downloadQrPng}
-                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-100 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  onClick={handleSaveQrToSystem}
+                  className="w-full py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>PNG</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadQrSvg}
-                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-semibold text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer"
-                >
-                  <FileCode className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>SVG Vektor</span>
+                  Simpan ke Sistem (Riwayat)
                 </button>
               </div>
             </div>
@@ -457,17 +519,31 @@ export const BarcodeQrView: React.FC = () => {
                 Data Barcode
               </h3>
 
-              <div>
-                <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
-                  Nomor Seri / Kode Produk
-                </label>
-                <input
-                  type="text"
-                  value={bcText}
-                  onChange={(e) => setBcText(e.target.value)}
-                  placeholder="Ketik angka atau alfanumerik..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100 font-mono tracking-wide"
-                />
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
+                    Label / Nama Produk (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={bcTitle}
+                    onChange={(e) => setBcTitle(e.target.value)}
+                    placeholder="Contoh: SKU Gudang A-01, Aset Laptop..."
+                    className="w-full px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
+                    Nomor Seri / Kode Produk
+                  </label>
+                  <input
+                    type="text"
+                    value={bcText}
+                    onChange={(e) => setBcText(e.target.value)}
+                    placeholder="Ketik angka atau alfanumerik..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100 font-mono tracking-wide"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -558,22 +634,31 @@ export const BarcodeQrView: React.FC = () => {
                 <svg ref={barcodeSvgRef} className="mx-auto" />
               </div>
 
-              <div className="w-full grid grid-cols-2 gap-3 mt-6">
+              <div className="w-full space-y-2 mt-6">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={downloadBarcodePng}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-100 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadBarcodeSvg}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-semibold text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer"
+                  >
+                    <FileCode className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>SVG</span>
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={downloadBarcodePng}
-                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-100 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  onClick={handleSaveBarcodeToSystem}
+                  className="w-full py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>PNG</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadBarcodeSvg}
-                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-semibold text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer"
-                >
-                  <FileCode className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>SVG Vektor</span>
+                  Simpan ke Sistem (Riwayat)
                 </button>
               </div>
             </div>
@@ -659,6 +744,123 @@ export const BarcodeQrView: React.FC = () => {
               <p className="text-sm font-mono p-3 bg-white dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-neutral-800 break-all select-all">
                 {scanResult}
               </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 4. History / Saved Barcodes Table List Tab */}
+      {activeTab === 'history' && (
+        <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-neutral-200 dark:border-neutral-800">
+            <div>
+              <h3 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+                Tabel Daftar QR & Barcode Tersimpan ({savedBarcodes.length})
+              </h3>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Semua QR Code & Barcode yang pernah Anda generate dan simpan tercatat rapi dan tersinkron di sistem.
+              </p>
+            </div>
+          </div>
+
+          {savedBarcodes.length === 0 ? (
+            <div className="py-16 text-center text-neutral-400 space-y-2">
+              <QrCode className="w-10 h-10 mx-auto opacity-40" />
+              <p className="text-xs">Belum ada QR atau Barcode yang disimpan ke sistem.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-neutral-200 dark:border-neutral-800 rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-neutral-50 dark:bg-neutral-800/80 border-b border-neutral-200 dark:border-neutral-800 text-[10px] uppercase tracking-wider font-bold text-neutral-500">
+                  <tr>
+                    <th className="py-3 px-3 w-10 text-center">No</th>
+                    <th className="py-3 px-3 w-20">Preview</th>
+                    <th className="py-3 px-3 w-24">Tipe</th>
+                    <th className="py-3 px-3 min-w-[160px]">Judul / Label</th>
+                    <th className="py-3 px-3 min-w-[180px]">Konten / Teks</th>
+                    <th className="py-3 px-3 w-28">Tanggal</th>
+                    <th className="py-3 px-3 w-36 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
+                  {savedBarcodes.map((item, idx) => (
+                    <tr key={item.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition-colors">
+                      <td className="py-2.5 px-3 text-center font-mono text-neutral-400">
+                        {idx + 1}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {item.dataUrl ? (
+                          <div className="w-14 h-14 p-1 bg-white rounded-lg border border-neutral-200 dark:border-neutral-700 flex items-center justify-center">
+                            <img src={item.dataUrl} alt={item.title} className="max-w-full max-h-full object-contain" />
+                          </div>
+                        ) : (
+                          <div className="w-14 h-14 rounded-lg bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-400">
+                            <QrCode className="w-5 h-5" />
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className={`inline-block text-[10px] font-bold uppercase font-mono px-2 py-0.5 rounded ${
+                          item.type === 'qr'
+                            ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
+                            : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                        }`}>
+                          {item.type}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-neutral-900 dark:text-neutral-100">
+                        <span className="line-clamp-2">{item.title}</span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-neutral-500">
+                        <div className="flex items-center gap-1.5 max-w-[240px]">
+                          <span className="truncate">{item.text}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(item.text);
+                              showToast('Konten kode disalin ke clipboard', 'success');
+                            }}
+                            className="p-1 rounded text-neutral-400 hover:text-indigo-500 shrink-0 cursor-pointer"
+                            title="Salin Teks/URL"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-neutral-400 whitespace-nowrap">
+                        {item.createdAt.split('T')[0]}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const ext = item.dataUrl?.startsWith('data:image/svg') ? 'svg' : 'png';
+                              const a = document.createElement('a');
+                              a.href = item.dataUrl || '';
+                              a.download = `${item.type}_${item.id}.${ext}`;
+                              a.click();
+                              showToast('Kode berhasil diunduh', 'success');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 text-[11px] font-semibold cursor-pointer"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Unduh</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteSavedBarcode(item.id)}
+                            className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                            title="Hapus"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

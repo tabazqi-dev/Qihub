@@ -1,34 +1,31 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  ChartOfAccount, 
-  CoaClass, 
-  FinancialAccount, 
-  FinanceTransaction, 
-  JournalEntry 
+import {
+  ChartOfAccount,
+  CoaClass,
+  FinancialAccount,
+  JournalEntry,
+  CategoryBudget
 } from '../../types';
-import { 
-  CoaLedgerSummary, 
-  AccountingEquationSummary 
+import {
+  CoaLedgerSummary,
+  AccountingEquationSummary,
+  generateBalanceSheetSummary
 } from '../../utils/accounting';
-import { 
-  BookOpen, 
-  Scale, 
-  FileSpreadsheet, 
-  Search, 
-  Filter, 
-  CheckCircle2, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  Layers, 
-  ChevronRight, 
-  Eye, 
-  X, 
-  HelpCircle,
-  Building2,
-  DollarSign,
+import {
+  BookOpen,
+  Scale,
+  Search,
+  CheckCircle2,
+  Layers,
+  Eye,
+  X,
   TrendingUp,
   TrendingDown,
-  Sparkles
+  AlertTriangle,
+  Download,
+  Landmark,
+  BarChart3,
+  Edit2
 } from 'lucide-react';
 
 interface ChartOfAccountsViewProps {
@@ -39,6 +36,17 @@ interface ChartOfAccountsViewProps {
   currencySymbol: string;
   onOpenAccountLedger: (acc: FinancialAccount) => void;
   accounts: FinancialAccount[];
+  // Unified P&L & Balance Sheet props
+  selectedMonth: string;
+  onChangeMonth: (month: string) => void;
+  availableMonths: string[];
+  monthlyIncome: number;
+  monthlyExpense: number;
+  monthlyProfitLoss: number;
+  monthlyCategoryExpenses: Record<string, number>;
+  categoryBudgets: CategoryBudget[];
+  onEditBudget: (category: string, currentLimit: number) => void;
+  onExportPnlCsv?: () => void;
 }
 
 export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
@@ -47,17 +55,22 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
   coaLedgers,
   accountingSummary,
   currencySymbol,
-  onOpenAccountLedger,
-  accounts
+  selectedMonth,
+  onChangeMonth,
+  availableMonths,
+  monthlyIncome,
+  monthlyExpense,
+  monthlyProfitLoss,
+  monthlyCategoryExpenses,
+  categoryBudgets,
+  onEditBudget,
+  onExportPnlCsv
 }) => {
-  const [viewMode, setViewMode] = useState<'chart' | 'journal' | 'trial_balance'>('chart');
+  const [viewMode, setViewMode] = useState<'chart' | 'journal' | 'trial_balance' | 'balance_sheet' | 'pnl'>('chart');
   const [classFilter, setClassFilter] = useState<'all' | CoaClass>('all');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Selected COA for General Ledger Drawer/Modal
   const [selectedCoaForDetail, setSelectedCoaForDetail] = useState<ChartOfAccount | null>(null);
 
-  // Filter COA accounts for table
   const filteredCoaList = useMemo(() => {
     return allCoaList.filter(coa => {
       if (classFilter !== 'all' && coa.category !== classFilter) return false;
@@ -72,13 +85,11 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
     });
   }, [allCoaList, classFilter, searchQuery]);
 
-  // Selected COA detail ledger
   const inspectedLedger = useMemo(() => {
     if (!selectedCoaForDetail) return null;
     return coaLedgers[selectedCoaForDetail.code] || null;
   }, [selectedCoaForDetail, coaLedgers]);
 
-  // Trial Balance accounts (accounts with either debit > 0 or credit > 0)
   const trialBalanceAccounts = useMemo(() => {
     return allCoaList.map(coa => {
       const ledger = coaLedgers[coa.code];
@@ -103,6 +114,28 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
     }).filter(item => item.hasActivity);
   }, [allCoaList, coaLedgers]);
 
+  const balanceSheet = useMemo(() => {
+    return generateBalanceSheetSummary(allCoaList, coaLedgers, accountingSummary);
+  }, [allCoaList, coaLedgers, accountingSummary]);
+
+  const handleExportBalanceSheetCsv = () => {
+    const rows = [
+      ['Kelompok', 'Kode Akun', 'Nama Akun', 'Sub Kategori', 'Saldo (Rp)'],
+      ...balanceSheet.assets.map(a => ['AKTIVA (ASET)', a.code, a.name, a.subCategory, String(a.balance)]),
+      ['TOTAL AKTIVA', '', '', '', String(balanceSheet.totalAssets)],
+      ...balanceSheet.liabilities.map(l => ['KEWAJIBAN', l.code, l.name, l.subCategory, String(l.balance)]),
+      ['TOTAL KEWAJIBAN', '', '', '', String(balanceSheet.totalLiabilities)],
+      ...balanceSheet.equity.map(e => ['EKUITAS', e.code, e.name, e.subCategory, String(e.balance)]),
+      ['EKUITAS', '3-9999', 'Laba / Rugi Tahun Berjalan (Net Income)', 'Laba Berjalan', String(balanceSheet.netIncome)],
+      ['TOTAL KEWAJIBAN + EKUITAS', '', '', '', String(balanceSheet.totalLiabilitiesAndEquity)]
+    ];
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const link = document.createElement('a');
+    link.href = encodeURI(csvContent);
+    link.download = `laporan-neraca-qhub-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
   const getClassBadge = (cat: CoaClass) => {
     switch (cat) {
       case 'asset':
@@ -120,13 +153,21 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
 
   const getClassNameIndonesian = (cat: CoaClass) => {
     switch (cat) {
-      case 'asset': return '1-Aset / Aktiva';
-      case 'liability': return '2-Kewajiban / Liabilitas';
-      case 'equity': return '3-Ekuitas / Modal';
-      case 'revenue': return '4-Pendapatan / Revenue';
-      case 'expense': return '5-Beban & Pengeluaran';
+      case 'asset': return '1-Aset';
+      case 'liability': return '2-Kewajiban';
+      case 'equity': return '3-Ekuitas';
+      case 'revenue': return '4-Pendapatan';
+      case 'expense': return '5-Beban';
     }
   };
+
+  const allPnlCategories = useMemo(() => {
+    const keys = new Set<string>([
+      ...Object.keys(monthlyCategoryExpenses),
+      ...categoryBudgets.map(b => b.category)
+    ]);
+    return Array.from(keys);
+  }, [monthlyCategoryExpenses, categoryBudgets]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -137,26 +178,28 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <div className="flex items-center gap-2">
               <BookOpen className="w-5 h-5 text-indigo-500" />
               <h3 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-                Bagan Akun Standar Akuntansi (Chart of Accounts & Jurnal)
+                General Ledger (Bagan Akun, Neraca & Laporan P&L)
               </h3>
             </div>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 max-w-2xl">
-              Seluruh transaksi kas, bank, e-wallet, hutang, dan piutang otomatis bermuara pada struktur 5 kelas akun akuntansi standar berprinsip berpasangan (Double-Entry Debit = Kredit).
+              Pusat pembukuan akuntansi terpadu: Bagan Akun (COA), Jurnal Umum Double-Entry, Neraca Saldo, Laporan Neraca (Balance Sheet), dan Laporan Laba-Rugi (P&L). Transaksi yang di-VOID otomatis dikecualikan.
             </p>
           </div>
 
-          {/* Balance Status Badge */}
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span>Double-Entry 100% Seimbang</span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold ${
+              accountingSummary.isEquationBalanced
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300'
+            }`}>
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{accountingSummary.isEquationBalanced ? 'Double-Entry Seimbang' : 'Periksa Selisih Jurnal'}</span>
             </span>
           </div>
         </div>
 
         {/* 5-Class Bento Accounting Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
-          {/* 1. Aset */}
           <div className="p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/60 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
               1-ASET (AKTIVA)
@@ -167,7 +210,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <span className="text-[10px] text-blue-600/80 dark:text-blue-400/80">Kas, Bank, Piutang</span>
           </div>
 
-          {/* 2. Kewajiban */}
           <div className="p-3.5 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
               2-KEWAJIBAN
@@ -178,7 +220,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80">Hutang & PayLater</span>
           </div>
 
-          {/* 3. Ekuitas */}
           <div className="p-3.5 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 block">
               3-EKUITAS (MODAL)
@@ -189,7 +230,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <span className="text-[10px] text-purple-600/80 dark:text-purple-400/80">Modal Awal Pemilik</span>
           </div>
 
-          {/* 4. Pendapatan */}
           <div className="p-3.5 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/60 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
               4-PENDAPATAN
@@ -200,7 +240,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">Gaji, Freelance, Jasa</span>
           </div>
 
-          {/* 5. Beban */}
           <div className="p-3.5 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/60 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block">
               5-BEBAN
@@ -211,7 +250,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <span className="text-[10px] text-rose-600/80 dark:text-rose-400/80">Operasional & Konsumsi</span>
           </div>
 
-          {/* 6. Laba / Rugi Bersih */}
           <div className="p-3.5 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/60 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block">
               LABA BERSIH (NET)
@@ -225,7 +263,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
           </div>
         </div>
 
-        {/* Persamaan Dasar Akuntansi Pill Banner */}
+        {/* Persamaan Dasar Akuntansi Banner */}
         <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700/80 flex flex-col sm:flex-row sm:items-center justify-between text-xs font-mono gap-2">
           <div className="flex flex-wrap items-center gap-1.5 text-neutral-700 dark:text-neutral-300">
             <span className="font-bold text-indigo-600 dark:text-indigo-400">Persamaan Akuntansi:</span>
@@ -247,8 +285,8 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
         </div>
       </div>
 
-      {/* Sub-view Selector Buttons (Chart of Accounts / General Journal / Trial Balance) */}
-      <div className="flex items-center gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-2 text-xs">
+      {/* Unified Sub-view Selector Buttons */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-2 text-xs">
         <button
           onClick={() => setViewMode('chart')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-semibold transition-all cursor-pointer ${
@@ -258,7 +296,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>Daftar Bagan Akun (COA Tree)</span>
+          <span>Bagan Akun (COA)</span>
         </button>
 
         <button
@@ -270,7 +308,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
           }`}
         >
           <BookOpen className="w-3.5 h-3.5" />
-          <span>Jurnal Umum Double-Entry ({journalEntries.length})</span>
+          <span>Jurnal Umum ({journalEntries.length})</span>
         </button>
 
         <button
@@ -282,17 +320,38 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
           }`}
         >
           <Scale className="w-3.5 h-3.5" />
-          <span>Neraca Saldo (Trial Balance)</span>
+          <span>Neraca Saldo</span>
+        </button>
+
+        <button
+          onClick={() => setViewMode('balance_sheet')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-semibold transition-all cursor-pointer ${
+            viewMode === 'balance_sheet'
+              ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-xs'
+              : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+          }`}
+        >
+          <Landmark className="w-3.5 h-3.5" />
+          <span>Laporan Neraca (Balance Sheet)</span>
+        </button>
+
+        <button
+          onClick={() => setViewMode('pnl')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-semibold transition-all cursor-pointer ${
+            viewMode === 'pnl'
+              ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-xs'
+              : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+          }`}
+        >
+          <BarChart3 className="w-3.5 h-3.5" />
+          <span>Laporan P&L & Budget</span>
         </button>
       </div>
 
-      {/* ======================================================== */}
-      {/* 1. VIEW MODE: CHART OF ACCOUNTS TREE                     */}
-      {/* ======================================================== */}
+      {/* 1. CHART OF ACCOUNTS TREE */}
       {viewMode === 'chart' && (
         <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-200 dark:border-neutral-800">
-            {/* Class Filter Tabs */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <button
                 onClick={() => setClassFilter('all')}
@@ -319,7 +378,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
               ))}
             </div>
 
-            {/* Search Input */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
               <input
@@ -332,7 +390,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             </div>
           </div>
 
-          {/* Table of COA Accounts */}
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
@@ -355,7 +412,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                   const isDebitNormal = coa.normalBalance === 'debit';
 
                   return (
-                    <tr 
+                    <tr
                       key={coa.code}
                       className="hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40 transition-colors"
                     >
@@ -387,8 +444,8 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
 
                       <td className="py-3 px-3 text-center font-sans text-[11px] whitespace-nowrap">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                          isDebitNormal 
-                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' 
+                          isDebitNormal
+                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
                             : 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
                         }`}>
                           {isDebitNormal ? 'Debit (+)' : 'Kredit (+)'}
@@ -427,9 +484,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* 2. VIEW MODE: DOUBLE-ENTRY GENERAL JOURNAL (JURNAL UMUM) */}
-      {/* ======================================================== */}
+      {/* 2. GENERAL JOURNAL */}
       {viewMode === 'journal' && (
         <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
@@ -438,7 +493,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                 Buku Jurnal Umum Berpasangan (Double-Entry General Journal)
               </h4>
               <p className="text-[11px] text-neutral-500 mt-0.5">
-                Format standar akuntansi: Setiap transaksi menjurnal sisi Debit (kiri) dan sisi Kredit (indentasi kanan) dengan nominal seimbang.
+                Format standar akuntansi: Setiap transaksi menjurnal sisi Debit dan Kredit dengan nominal seimbang.
               </p>
             </div>
             <span className="text-xs font-mono font-bold text-neutral-500">
@@ -463,7 +518,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                 <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800 font-mono">
                   {journalEntries.map((entry) => (
                     <React.Fragment key={entry.id}>
-                      {/* Entry Header Row */}
                       <tr className="bg-neutral-50/50 dark:bg-neutral-800/30 text-[11px]">
                         <td className="py-2 px-3 font-semibold text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
                           {entry.date} • <span className="text-indigo-600 dark:text-indigo-400">{entry.referenceNo}</span>
@@ -476,10 +530,8 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                         </td>
                       </tr>
 
-                      {/* Entry Posting Lines (Standard Indented Accounting Format) */}
                       {entry.lines.map((line, lIdx) => {
                         const isDebit = line.debit > 0;
-
                         return (
                           <tr key={lIdx} className="hover:bg-neutral-50/30">
                             <td className="py-1.5 px-3"></td>
@@ -507,9 +559,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* 3. VIEW MODE: NERACA SALDO (TRIAL BALANCE)               */}
-      {/* ======================================================== */}
+      {/* 3. TRIAL BALANCE */}
       {viewMode === 'trial_balance' && (
         <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-200 dark:border-neutral-800">
@@ -521,11 +571,13 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                 Kompilasi saldo akhir seluruh akun aktif untuk membuktikan keseimbangan debit dan kredit buku besar.
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-mono text-xs font-bold">
-                Status: Balanced
-              </span>
-            </div>
+            <span className={`px-2.5 py-1 rounded-lg font-mono text-xs font-bold ${
+              accountingSummary.isTrialBalanceBalanced
+                ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                : 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+            }`}>
+              {accountingSummary.isTrialBalanceBalanced ? 'Status: Balanced' : 'Status: Unbalanced'}
+            </span>
           </div>
 
           <div className="overflow-x-auto">
@@ -560,7 +612,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                   </tr>
                 ))}
               </tbody>
-              {/* Grand Total Footer */}
               <tfoot>
                 <tr className="border-t-2 border-neutral-900 dark:border-neutral-100 font-mono text-sm font-bold bg-neutral-50 dark:bg-neutral-800/60">
                   <td colSpan={3} className="py-3 px-3 uppercase text-neutral-900 dark:text-neutral-100">
@@ -579,13 +630,289 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* MODAL / DRAWER: BUKU BESAR (GENERAL LEDGER) DETAIL       */}
-      {/* ======================================================== */}
+      {/* 4. BALANCE SHEET (LAPORAN NERACA) */}
+      {viewMode === 'balance_sheet' && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-200 dark:border-neutral-800">
+            <div>
+              <h4 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                <Landmark className="w-4 h-4 text-indigo-500" />
+                <span>Laporan Neraca (Balance Sheet)</span>
+              </h4>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                Posisi Keuangan: Total Aktiva (Aset) dibandingkan dengan Total Pasiva (Kewajiban + Ekuitas + Laba Berjalan).
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold ${
+                balanceSheet.isBalanced
+                  ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+              }`}>
+                {balanceSheet.isBalanced ? 'NERACA SEIMBANG (BALANCED)' : 'SELISIH NERACA'}
+              </span>
+              <button
+                onClick={handleExportBalanceSheetCsv}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold hover:opacity-90 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export CSV</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* LEFT SIDE: AKTIVA (ASSETS) */}
+            <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-950/10 overflow-hidden flex flex-col">
+              <div className="px-4 py-3 bg-blue-50/70 dark:bg-blue-950/40 border-b border-blue-200 dark:border-blue-900/50 flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+                  AKTIVA (ASET)
+                </span>
+                <span className="text-xs font-mono font-bold text-blue-800 dark:text-blue-200 tabular-nums">
+                  {currencySymbol} {balanceSheet.totalAssets.toLocaleString('id-ID')}
+                </span>
+              </div>
+
+              <div className="divide-y divide-neutral-200/70 dark:divide-neutral-800/70 flex-1">
+                {balanceSheet.assets.map(item => (
+                  <div key={item.code} className="px-4 py-2.5 flex items-center justify-between text-xs gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                        <span className="font-mono text-indigo-600 dark:text-indigo-400 mr-1.5">{item.code}</span>
+                        {item.name}
+                      </p>
+                      <p className="text-[10px] text-neutral-400">{item.subCategory}</p>
+                    </div>
+                    <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200 tabular-nums shrink-0">
+                      {currencySymbol} {item.balance.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="px-4 py-3 bg-blue-100/60 dark:bg-blue-950/50 border-t border-blue-200 dark:border-blue-900/50 flex items-center justify-between text-xs font-bold">
+                <span className="text-blue-900 dark:text-blue-100 uppercase">Total Aktiva (Aset)</span>
+                <span className="font-mono text-sm text-blue-900 dark:text-blue-100 tabular-nums">
+                  {currencySymbol} {balanceSheet.totalAssets.toLocaleString('id-ID')}
+                </span>
+              </div>
+            </div>
+
+            {/* RIGHT SIDE: PASIVA (LIABILITIES + EQUITY + NET INCOME) */}
+            <div className="rounded-xl border border-purple-200 dark:border-purple-900/50 bg-purple-50/15 dark:bg-purple-950/10 overflow-hidden flex flex-col">
+              <div className="px-4 py-3 bg-purple-50/70 dark:bg-purple-950/40 border-b border-purple-200 dark:border-purple-900/50 flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">
+                  PASIVA (KEWAJIBAN & EKUITAS)
+                </span>
+                <span className="text-xs font-mono font-bold text-purple-800 dark:text-purple-200 tabular-nums">
+                  {currencySymbol} {balanceSheet.totalLiabilitiesAndEquity.toLocaleString('id-ID')}
+                </span>
+              </div>
+
+              <div className="flex-1 divide-y divide-neutral-200/70 dark:divide-neutral-800/70">
+                <div className="px-4 py-2 bg-amber-50/50 dark:bg-amber-950/20 text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300">
+                  Kewajiban (Liabilitas)
+                </div>
+                {balanceSheet.liabilities.length === 0 ? (
+                  <div className="px-4 py-3 text-xs text-neutral-400">Tidak ada saldo kewajiban.</div>
+                ) : (
+                  balanceSheet.liabilities.map(item => (
+                    <div key={item.code} className="px-4 py-2.5 flex items-center justify-between text-xs gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                          <span className="font-mono text-amber-600 dark:text-amber-400 mr-1.5">{item.code}</span>
+                          {item.name}
+                        </p>
+                        <p className="text-[10px] text-neutral-400">{item.subCategory}</p>
+                      </div>
+                      <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200 tabular-nums shrink-0">
+                        {currencySymbol} {item.balance.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  ))
+                )}
+
+                <div className="px-4 py-2 bg-purple-50/60 dark:bg-purple-950/30 text-[11px] font-bold uppercase text-purple-700 dark:text-purple-300">
+                  Ekuitas & Laba Berjalan
+                </div>
+                {balanceSheet.equity.map(item => (
+                  <div key={item.code} className="px-4 py-2.5 flex items-center justify-between text-xs gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                        <span className="font-mono text-purple-600 dark:text-purple-400 mr-1.5">{item.code}</span>
+                        {item.name}
+                      </p>
+                      <p className="text-[10px] text-neutral-400">{item.subCategory}</p>
+                    </div>
+                    <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200 tabular-nums shrink-0">
+                      {currencySymbol} {item.balance.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                ))}
+
+                <div className="px-4 py-2.5 flex items-center justify-between text-xs gap-2 bg-indigo-50/40 dark:bg-indigo-950/20">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-neutral-900 dark:text-neutral-100">
+                      <span className="font-mono text-indigo-600 dark:text-indigo-400 mr-1.5">3-9999</span>
+                      Laba / Rugi Periode Berjalan (Net Income)
+                    </p>
+                    <p className="text-[10px] text-neutral-400">Selisih Pendapatan & Beban</p>
+                  </div>
+                  <span className={`font-mono font-bold tabular-nums shrink-0 ${
+                    balanceSheet.netIncome >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                  }`}>
+                    {currencySymbol} {balanceSheet.netIncome.toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
+
+              <div className="px-4 py-3 bg-purple-100/60 dark:bg-purple-950/50 border-t border-purple-200 dark:border-purple-900/50 flex items-center justify-between text-xs font-bold">
+                <span className="text-purple-900 dark:text-purple-100 uppercase">Total Pasiva (Kewajiban + Ekuitas)</span>
+                <span className="font-mono text-sm text-purple-900 dark:text-purple-100 tabular-nums">
+                  {currencySymbol} {balanceSheet.totalLiabilitiesAndEquity.toLocaleString('id-ID')}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. LAPORAN P&L & BUDGET */}
+      {viewMode === 'pnl' && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-200 dark:border-neutral-800">
+            <div>
+              <h4 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                Laporan Laba-Rugi (P&L) & Kontrol Overbudget
+              </h4>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                Analisis pendapatan, pengeluaran operasional, surplus/defisit, dan batas anggaran kategori per bulan.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedMonth}
+                onChange={(e) => onChangeMonth(e.target.value)}
+                className="px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs font-mono font-semibold cursor-pointer"
+              >
+                {availableMonths.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              {onExportPnlCsv && (
+                <button
+                  onClick={onExportPnlCsv}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold hover:opacity-90 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export P&L CSV</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 space-y-1">
+              <div className="flex items-center justify-between text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                <span>Pendapatan ({selectedMonth})</span>
+                <TrendingUp className="w-4 h-4" />
+              </div>
+              <p className="text-lg font-bold font-mono text-emerald-950 dark:text-emerald-100 tabular-nums">
+                +{currencySymbol} {monthlyIncome.toLocaleString('id-ID')}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 space-y-1">
+              <div className="flex items-center justify-between text-xs text-rose-600 dark:text-rose-400 font-semibold">
+                <span>Pengeluaran ({selectedMonth})</span>
+                <TrendingDown className="w-4 h-4" />
+              </div>
+              <p className="text-lg font-bold font-mono text-rose-950 dark:text-rose-100 tabular-nums">
+                -{currencySymbol} {monthlyExpense.toLocaleString('id-ID')}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/50 space-y-1">
+              <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 block">
+                Surplus / Defisit Bulan Ini
+              </span>
+              <p className={`text-lg font-bold font-mono tabular-nums ${
+                monthlyProfitLoss >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+              }`}>
+                {monthlyProfitLoss >= 0 ? '+' : '-'}{currencySymbol} {Math.abs(monthlyProfitLoss).toLocaleString('id-ID')}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h5 className="text-xs font-bold uppercase tracking-wider text-neutral-500">
+              Realisasi Belanja vs Batas Anggaran per Kategori
+            </h5>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {allPnlCategories.map(cat => {
+                const spent = monthlyCategoryExpenses[cat] || 0;
+                const budgetObj = categoryBudgets.find(b => b.category === cat);
+                const limit = budgetObj?.limit || 0;
+                const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
+                const isOver = limit > 0 && spent > limit;
+
+                return (
+                  <div
+                    key={cat}
+                    className={`p-3.5 rounded-xl border space-y-2 ${
+                      isOver
+                        ? 'border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/20'
+                        : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100 truncate">{cat}</span>
+                        {isOver && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 text-[10px] font-bold">
+                            <AlertTriangle className="w-3 h-3" /> Overbudget
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => onEditBudget(cat, limit)}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3" /> Atur Limit
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs font-mono tabular-nums">
+                      <span className={isOver ? 'text-rose-600 font-bold' : 'text-neutral-700 dark:text-neutral-300'}>
+                        {currencySymbol} {spent.toLocaleString('id-ID')}
+                      </span>
+                      <span className="text-neutral-400">
+                        / {limit > 0 ? `${currencySymbol} ${limit.toLocaleString('id-ID')}` : 'Tanpa Batas'}
+                      </span>
+                    </div>
+
+                    {limit > 0 && (
+                      <div className="w-full h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            isOver ? 'bg-rose-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BUKU BESAR DETAIL */}
       {selectedCoaForDetail && inspectedLedger && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs animate-in fade-in">
           <div className="w-full max-w-2xl bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-6 space-y-4 max-h-[85vh] flex flex-col">
-            {/* Modal Header */}
             <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-sm">
@@ -612,7 +939,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
               </button>
             </div>
 
-            {/* Account Quick Summary in Modal */}
             <div className="grid grid-cols-3 gap-3 shrink-0 text-xs font-mono">
               <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700">
                 <span className="text-[10px] text-neutral-400 block">Total Mutasi Debit</span>
@@ -634,7 +960,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
               </div>
             </div>
 
-            {/* Ledger Postings Table */}
             <div className="flex-1 overflow-y-auto border border-neutral-200 dark:border-neutral-800 rounded-xl">
               {inspectedLedger.lines.length === 0 ? (
                 <div className="py-12 text-center text-neutral-400 text-xs">
@@ -677,7 +1002,6 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
               )}
             </div>
 
-            {/* Modal Footer */}
             <div className="pt-2 border-t border-neutral-200 dark:border-neutral-800 flex justify-end shrink-0">
               <button
                 onClick={() => setSelectedCoaForDetail(null)}

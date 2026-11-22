@@ -442,8 +442,13 @@ export const generateStandardJournalEntries = (
     }
   });
 
-  // 2. Regular Transactions & Transfers Journal Entries
+  // 2. Regular Transactions, Adjustments & Transfers Journal Entries
   transactions.forEach((tx, index) => {
+    // Audit Rule: Voided transactions must NEVER post to General Journal or COA Balances
+    if (tx.isVoided) {
+      return;
+    }
+
     // If it's a transfer inflow, skip it because the paired transfer outflow already creates the full double-entry
     if (tx.transferId && tx.type === 'income') {
       return;
@@ -457,13 +462,40 @@ export const generateStandardJournalEntries = (
 
     let debitCoa: ChartOfAccount;
     let creditCoa: ChartOfAccount;
-    let entrySourceType: 'transaction' | 'transfer' = 'transaction';
+    let entrySourceType: 'transaction' | 'transfer' | 'audit_adjustment' = 'transaction';
     let refPrefix = 'TXN';
 
-    if (tx.transferId && tx.category === 'Transfer & Tarik Tunai') {
+    if (tx.coaCode) {
+      // Explicit COA Adjustment selected from Akun & Saldo Awal
+      entrySourceType = 'audit_adjustment';
+      refPrefix = 'ADJ';
+      const inferredCategory: CoaClass = tx.coaCode.startsWith('1')
+        ? 'asset'
+        : tx.coaCode.startsWith('2')
+        ? 'liability'
+        : tx.coaCode.startsWith('3')
+        ? 'equity'
+        : tx.coaCode.startsWith('4')
+        ? 'revenue'
+        : 'expense';
+
+      const contraCoa = allCoa.find(c => c.code === tx.coaCode) || {
+        code: tx.coaCode,
+        name: tx.coaName || 'Penyesuaian COA',
+        category: inferredCategory,
+        subCategory: 'Penyesuaian COA',
+        normalBalance: (inferredCategory === 'asset' || inferredCategory === 'expense') ? 'debit' as const : 'credit' as const
+      };
+
+      if (tx.type === 'income') {
+        debitCoa = assetCoa;
+        creditCoa = contraCoa;
+      } else {
+        debitCoa = contraCoa;
+        creditCoa = assetCoa;
+      }
+    } else if (tx.transferId && tx.category === 'Transfer & Tarik Tunai') {
       // Transfer / Tarik Tunai Antar Akun (Asset-to-Asset Swap)
-      // Debit: Akun Tujuan (Asset bertambah)
-      // Kredit: Akun Asal (Asset berkurang)
       entrySourceType = 'transfer';
       refPrefix = 'TRF';
       const targetAcc = accounts.find(a => a.id === tx.targetAccountId) ||
@@ -693,3 +725,77 @@ export const getAccountingEquationSummary = (
     isTrialBalanceBalanced
   };
 };
+
+// =========================================================================
+// BALANCE SHEET STATEMENT (LAPORAN NERACA: AKTIVA vs KEWAJIBAN + EKUITAS)
+// =========================================================================
+
+export interface BalanceSheetLineItem {
+  code: string;
+  name: string;
+  subCategory: string;
+  balance: number;
+}
+
+export interface BalanceSheetSummary {
+  assets: BalanceSheetLineItem[];
+  liabilities: BalanceSheetLineItem[];
+  equity: BalanceSheetLineItem[];
+  netIncome: number;
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number;
+  totalEquityPlusNetIncome: number;
+  totalLiabilitiesAndEquity: number;
+  isBalanced: boolean;
+}
+
+export const generateBalanceSheetSummary = (
+  coaList: ChartOfAccount[],
+  ledgerSummaries: Record<string, CoaLedgerSummary>,
+  accountingSummary: AccountingEquationSummary
+): BalanceSheetSummary => {
+  const assets: BalanceSheetLineItem[] = [];
+  const liabilities: BalanceSheetLineItem[] = [];
+  const equity: BalanceSheetLineItem[] = [];
+
+  coaList.forEach(coa => {
+    const ledger = ledgerSummaries[coa.code];
+    const ending = ledger ? ledger.endingBalance : 0;
+    const hasActivity = (ledger?.mutationCount || 0) > 0 || ending !== 0;
+
+    if (!hasActivity && !coa.linkedAccountId) return;
+
+    const item: BalanceSheetLineItem = {
+      code: coa.code,
+      name: coa.name,
+      subCategory: coa.subCategory,
+      balance: ending
+    };
+
+    if (coa.category === 'asset') assets.push(item);
+    else if (coa.category === 'liability') liabilities.push(item);
+    else if (coa.category === 'equity') equity.push(item);
+  });
+
+  const totalAssets = accountingSummary.totalAssets;
+  const totalLiabilities = accountingSummary.totalLiabilities;
+  const totalEquity = accountingSummary.totalEquity;
+  const netIncome = accountingSummary.netIncome;
+  const totalEquityPlusNetIncome = totalEquity + netIncome;
+  const totalLiabilitiesAndEquity = totalLiabilities + totalEquityPlusNetIncome;
+
+  return {
+    assets,
+    liabilities,
+    equity,
+    netIncome,
+    totalAssets,
+    totalLiabilities,
+    totalEquity,
+    totalEquityPlusNetIncome,
+    totalLiabilitiesAndEquity,
+    isBalanced: Math.abs(totalAssets - totalLiabilitiesAndEquity) < 1
+  };
+};
+

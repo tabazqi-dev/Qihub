@@ -8,7 +8,28 @@ export type NavigationTab =
   | 'pdftools' 
   | 'barcode' 
   | 'focus' 
+  | 'logbook'
   | 'architecture';
+
+export interface LogbookEntry {
+  id: string;
+  date: string; // YYYY-MM-DD
+  project: string;
+  hours: number;
+  category: string;
+  description: string;
+  status: 'Completed' | 'In Progress';
+  createdAt: string;
+}
+
+export interface SavedBarcode {
+  id: string;
+  type: 'qr' | 'barcode';
+  text: string;
+  title: string;
+  createdAt: string;
+  dataUrl?: string;
+}
 
 export type PriorityLevel = 'low' | 'medium' | 'high';
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
@@ -90,13 +111,23 @@ export interface AccountTransferPayload {
   notes?: string;
 }
 
+export interface CoaAdjustmentPayload {
+  accountId: string;
+  adjustmentType: 'increase' | 'decrease';
+  amount: number;
+  coaCode: string;
+  coaName: string;
+  date: string; // YYYY-MM-DD
+  description: string;
+}
+
 export interface FinanceTransaction {
   id: string;
   type: 'income' | 'expense';
   title: string;
   amount: number;
   category: string;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD (supports backdate)
   paymentMethod: 'Bank Transfer' | 'E-Wallet' | 'Cash' | 'Credit Card';
   walletType: WalletType; // Cash vs Non-Cash
   accountName?: string; // e.g., 'Dompet Tunai', 'BCA', 'GoPay', 'Mandiri'
@@ -108,11 +139,18 @@ export interface FinanceTransaction {
   targetAccountId?: string;
   targetAccountName?: string;
   notes?: string;
-  // Standard Accounting COA mapping
+  // Standard Accounting COA mapping & Adjustment
   debitAccountCode?: string;
   debitAccountName?: string;
   creditAccountCode?: string;
   creditAccountName?: string;
+  isAdjustment?: boolean;
+  coaCode?: string;
+  coaName?: string;
+  // Void audit trail
+  isVoided?: boolean;
+  voidedAt?: string;
+  voidReason?: string;
 }
 
 // Hutang Orang Lain ke Saya (Piutang / Receivables)
@@ -132,6 +170,7 @@ export interface DebtReceivable {
   sourceAccountName?: string; // Nama akun
   deductFromAccount?: boolean; // Apakah dipotong dari saldo akun saat dicatat
   disbursementTransactionId?: string; // ID transaksi pengeluaran terkait
+  qrImageDataUrl?: string; // Gambar QR pembayaran khusus piutang/invoice ini
   notes?: string;
 }
 
@@ -196,6 +235,7 @@ export interface UserProfile {
   currencySymbol: string;
   monthlyBudget: number;
   bankAccountDetails?: string; // for Invoices
+  paymentQrDataUrl?: string; // Default QR Code image for WA & PDF invoices
 }
 
 export interface HabitItem {

@@ -509,16 +509,16 @@ export const ReimburseView: React.FC = () => {
       r.deliveryDate || '-'
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + 
-      [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `Rekap_Reimburse_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 
     showToast('Berkas Excel CSV klaim reimburse berhasil diunduh!', 'success');
   };
@@ -1287,104 +1287,27 @@ export const ReimburseView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Row 4: Mode Pemilihan Hari Kerja (Kalender Interaktif vs Rentang Tanggal) */}
+              {/* Row 4: Mode Pemilihan Hari Kerja (Hanya Kalender Interaktif) */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                    Penetapan Hari Kerja Proyek <span className="text-rose-500">*</span>
+                    Penetapan Hari Kerja Proyek (Klik di Kalender) <span className="text-rose-500">*</span>
                   </label>
-                  
-                  {/* Mode Switcher Tabs */}
-                  <div className="flex items-center p-0.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-[11px] font-semibold">
-                    <button
-                      type="button"
-                      onClick={() => setFormDateMode('calendar')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                        formDateMode === 'calendar'
-                          ? 'bg-white dark:bg-neutral-700 text-indigo-600 dark:text-indigo-300 font-bold shadow-xs'
-                          : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
-                      }`}
-                    >
-                      <MousePointerClick className="w-3.5 h-3.5" />
-                      <span>Klik di Kalender</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormDateMode('range');
-                        if (formStartDate && formEndDate) {
-                          setFormSelectedDates(getDatesBetween(formStartDate, formEndDate));
-                        }
-                      }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                        formDateMode === 'range'
-                          ? 'bg-white dark:bg-neutral-700 text-indigo-600 dark:text-indigo-300 font-bold shadow-xs'
-                          : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
-                      }`}
-                    >
-                      <CalendarDays className="w-3.5 h-3.5" />
-                      <span>Rentang Mulai - Selesai</span>
-                    </button>
-                  </div>
                 </div>
 
-                {/* Sub-view A: Interactive Calendar Picker */}
-                {formDateMode === 'calendar' ? (
-                  <div className="space-y-2">
-                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                      💡 <strong>Klik langsung tanggal kerja Anda di kalender</strong> (warna biru untuk Weekday, ungu untuk Weekend). Nilai dan jumlah hari/sesi otomatis dihitung sesuai rate Excel.
-                    </p>
-                    <ReimburseCalendarPicker
-                      selectedDates={formSelectedDates}
-                      onChangeDates={handleCalendarDatesChange}
-                      typeProject={formTypeProject}
-                      wdRate={currentRate.wdRate}
-                      weRate={currentRate.weRate}
-                      initialMonthDate={formStartDate || formSubmissionDate}
-                    />
-                  </div>
-                ) : (
-                  /* Sub-view B: Standard Date Range Inputs */
-                  <div className="space-y-3 p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                          Mulai Project
-                        </label>
-                        <input
-                          type="date"
-                          required
-                          value={formStartDate}
-                          onChange={(e) => {
-                            handleStartDateChange(e.target.value);
-                            if (e.target.value && formEndDate) {
-                              setFormSelectedDates(getDatesBetween(e.target.value, formEndDate));
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100"
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                          Selesai Project
-                        </label>
-                        <input
-                          type="date"
-                          required
-                          value={formEndDate}
-                          onChange={(e) => {
-                            handleEndDateChange(e.target.value);
-                            if (formStartDate && e.target.value) {
-                              setFormSelectedDates(getDatesBetween(formStartDate, e.target.value));
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono text-neutral-900 dark:text-neutral-100"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                    💡 <strong>Klik tanggal kerja Anda di kalender</strong> (warna biru untuk Weekday, ungu untuk Weekend). Nilai dan jumlah hari/sesi otomatis dihitung sesuai rate Excel.
+                  </p>
+                  <ReimburseCalendarPicker
+                    selectedDates={formSelectedDates}
+                    onChangeDates={handleCalendarDatesChange}
+                    typeProject={formTypeProject}
+                    wdRate={currentRate.wdRate}
+                    weRate={currentRate.weRate}
+                    initialMonthDate={formStartDate || formSubmissionDate}
+                  />
+                </div>
               </div>
 
               {/* Row 5: # WD, # WE, and Total Hari */}

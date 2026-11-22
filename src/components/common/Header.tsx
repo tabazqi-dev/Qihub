@@ -5,7 +5,6 @@ import {
   Menu, 
   Sun, 
   Moon, 
-  Plus, 
   Search, 
   Calendar as CalendarIcon,
   HelpCircle
@@ -13,7 +12,6 @@ import {
 
 interface HeaderProps {
   onToggleMobileSidebar: () => void;
-  onOpenQuickAdd: () => void;
   onOpenSearch: () => void;
 }
 
@@ -27,12 +25,12 @@ const TAB_TITLES: Record<NavigationTab, { title: string; subtitle: string }> = {
   pdftools: { title: 'PDF Utilities & E-Signature', subtitle: 'Konversi gambar, kompresi ukuran file, dan tanda tangan digital' },
   barcode: { title: 'QR & Barcode Studio', subtitle: 'Generator & pemindai barcode / QR code' },
   focus: { title: 'Pomodoro Focus Timer', subtitle: 'Ritme kerja terfokus dengan suara latar' },
+  logbook: { title: 'Logbook Kerja Harian', subtitle: 'Pencatatan aktivitas harian dan ekspor laporan XLSX' },
   architecture: { title: 'Arsitektur Modular Super App', subtitle: 'Struktur kode & panduan integrasi sistem' },
 };
 
 export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar,
-  onOpenQuickAdd,
   onOpenSearch
 }) => {
   const { activeTab, setActiveTab, theme, toggleTheme } = useApp();
@@ -62,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => setActiveTab('dashboard')}
             className="cursor-pointer hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors font-medium hidden sm:inline"
           >
-            OmniHub
+            Q'Hub
           </span>
           <span className="hidden sm:inline text-neutral-300 dark:text-neutral-600">/</span>
           <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
@@ -71,33 +69,37 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Zone 2: Date & Search Trigger */}
-      <div className="hidden md:flex items-center gap-4 text-xs text-neutral-500 dark:text-neutral-400">
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/80 font-mono text-[11px] tabular-nums">
-          <CalendarIcon className="w-3.5 h-3.5 text-neutral-400" />
-          <span>{todayFormatted}</span>
+      {/* Zone 2: Empty Spacer */}
+      <div className="hidden md:flex flex-1" />
+
+      {/* Zone 3: Date, Search, Actions & Theme Toggle (All on Right Side) */}
+      <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+        <div className="hidden md:flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/80 font-mono text-[11px] tabular-nums">
+            <CalendarIcon className="w-3.5 h-3.5 text-neutral-400" />
+            <span>{todayFormatted}</span>
+          </div>
+
+          <button
+            onClick={onOpenSearch}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200/70 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors text-xs cursor-pointer"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span>Cari cepat...</span>
+            <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 font-mono">
+              ⌘K
+            </kbd>
+          </button>
         </div>
 
+        {/* Mobile Quick Search next to Dark/Light */}
         <button
           onClick={onOpenSearch}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200/70 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors text-xs"
+          className="md:hidden p-2 rounded-lg text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+          aria-label="Cari cepat"
+          title="Cari cepat"
         >
-          <Search className="w-3.5 h-3.5" />
-          <span>Cari cepat...</span>
-          <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 font-mono">
-            ⌘K
-          </kbd>
-        </button>
-      </div>
-
-      {/* Zone 3: Actions & Theme Toggle */}
-      <div className="flex items-center gap-2 shrink-0">
-        <button
-          onClick={onOpenQuickAdd}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-all shadow-xs shrink-0 cursor-pointer"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Tambah Cepat</span>
+          <Search className="w-4 h-4" />
         </button>
 
         <button

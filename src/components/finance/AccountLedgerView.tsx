@@ -21,7 +21,8 @@ import {
   Calendar,
   ExternalLink,
   ChevronDown,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Ban
 } from 'lucide-react';
 import { getCoaForFinancialAccount, getCoaForCategory } from '../../utils/accounting';
 
@@ -36,6 +37,7 @@ interface AccountLedgerViewProps {
   onAddTransactionForAccount: (accountId: string) => void;
   onEditInitialBalance: (account: FinancialAccount) => void;
   onDeleteTransaction: (id: string) => void;
+  onVoidTransaction?: (id: string) => void;
   onNavigateToCoa: () => void;
   onOpenTransfer?: (sourceAccountId: string, type: 'cash_withdrawal' | 'transfer' | 'ewallet_topup' | 'cash_deposit') => void;
 }
@@ -51,6 +53,7 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
   onAddTransactionForAccount,
   onEditInitialBalance,
   onDeleteTransaction,
+  onVoidTransaction,
   onNavigateToCoa,
   onOpenTransfer
 }) => {
@@ -80,18 +83,22 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
 
     const computed = chronological.map((tx, idx) => {
       const isIncome = tx.type === 'income';
-      if (isIncome) {
-        running += tx.amount;
-        inSum += tx.amount;
-        inCount += 1;
-      } else {
-        running -= tx.amount;
-        outSum += tx.amount;
-        outCount += 1;
+      if (!tx.isVoided) {
+        if (isIncome) {
+          running += tx.amount;
+          inSum += tx.amount;
+          inCount += 1;
+        } else {
+          running -= tx.amount;
+          outSum += tx.amount;
+          outCount += 1;
+        }
       }
 
-      // Identify Contra Account in standard double entry accounting
-      const contraCoa = getCoaForCategory(tx.category, tx.type, allCoaList);
+      // Identify Contra Account in standard double entry accounting (honor adjustment COA override)
+      const contraCoa = tx.coaCode
+        ? { code: tx.coaCode, name: tx.coaName || 'Penyesuaian COA' }
+        : getCoaForCategory(tx.category, tx.type, allCoaList);
 
       return {
         ...tx,
@@ -377,19 +384,24 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
                   return (
                     <tr 
                       key={m.id}
-                      className="hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40 transition-colors"
+                      className={`hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40 transition-colors ${m.isVoided ? 'opacity-50' : ''}`}
                     >
                       <td className="py-3 px-3 text-neutral-500 whitespace-nowrap">
                         {m.date}
                       </td>
 
                       <td className="py-3 px-3 font-sans">
-                        <div className="font-semibold text-neutral-900 dark:text-neutral-100">
-                          {m.title}
+                        <div className={`font-semibold flex items-center gap-1.5 ${m.isVoided ? 'line-through text-neutral-400' : 'text-neutral-900 dark:text-neutral-100'}`}>
+                          <span>{m.title}</span>
+                          {m.isVoided && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 text-[9px] font-mono font-bold no-underline">
+                              VOID
+                            </span>
+                          )}
                         </div>
                         {m.notes && (
                           <div className="text-[11px] text-neutral-400 font-sans line-clamp-1">
-                            {m.notes}
+                            {m.voidReason ? `Void: ${m.voidReason}` : m.notes}
                           </div>
                         )}
                       </td>
@@ -407,11 +419,11 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
                         <span>{m.contraCoaName}</span>
                       </td>
 
-                      <td className="py-3 px-3 text-right text-emerald-600 dark:text-emerald-400 font-bold whitespace-nowrap">
+                      <td className={`py-3 px-3 text-right font-bold whitespace-nowrap ${m.isVoided ? 'line-through text-neutral-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                         {isIncome ? `+${currencySymbol} ${m.amount.toLocaleString('id-ID')}` : '-'}
                       </td>
 
-                      <td className="py-3 px-3 text-right text-rose-600 dark:text-rose-400 font-bold whitespace-nowrap">
+                      <td className={`py-3 px-3 text-right font-bold whitespace-nowrap ${m.isVoided ? 'line-through text-neutral-400' : 'text-rose-600 dark:text-rose-400'}`}>
                         {!isIncome ? `-${currencySymbol} ${m.amount.toLocaleString('id-ID')}` : '-'}
                       </td>
 
@@ -420,13 +432,24 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
                       </td>
 
                       <td className="py-3 px-3 text-center">
-                        <button
-                          onClick={() => onDeleteTransaction(m.id)}
-                          className="p-1 rounded text-neutral-400 hover:text-rose-500 cursor-pointer transition-colors"
-                          title="Hapus Transaksi"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          {!m.isVoided && onVoidTransaction && (
+                            <button
+                              onClick={() => onVoidTransaction(m.id)}
+                              className="p-1 rounded text-neutral-400 hover:text-amber-500 cursor-pointer transition-colors"
+                              title="Void Transaksi"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onDeleteTransaction(m.id)}
+                            className="p-1 rounded text-neutral-400 hover:text-rose-500 cursor-pointer transition-colors"
+                            title="Hapus Transaksi"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

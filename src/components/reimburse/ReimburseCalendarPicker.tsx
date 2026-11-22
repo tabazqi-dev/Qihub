@@ -110,7 +110,7 @@ export const ReimburseCalendarPicker: React.FC<ReimburseCalendarPickerProps> = (
     if (selectedDates.includes(dateStr)) {
       onChangeDates(selectedDates.filter(d => d !== dateStr));
     } else {
-      const updated = [...selectedDates, dateStr].sort();
+      const updated = Array.from(new Set([...selectedDates, dateStr])).sort();
       onChangeDates(updated);
     }
   };

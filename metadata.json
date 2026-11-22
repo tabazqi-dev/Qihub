@@ -1,5 +1,5 @@
 {
-  "name": "Qihub - Personal Super App & Management Suite",
+  "name": "Q'Hub - Personal Super App & Management Suite",
   "description": "Super App all-in-one manajemen keuangan, reimbursements, PDF utilities, task management, dan knowledge base.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

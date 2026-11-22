@@ -1,0 +1,375 @@
+{
+  "entities": {
+    "UserRoot": {
+      "title": "User Root Workspace",
+      "description": "Master user document anchoring ownership and email-verified identity.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "email", "displayName", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User workspace profile, invoice bank details, and default payment QR image.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "title": { "type": "string", "maxLength": 160 },
+        "avatarUrl": { "type": "string", "maxLength": 250000 },
+        "currencySymbol": { "type": "string", "minLength": 1, "maxLength": 10 },
+        "monthlyBudget": { "type": "number" },
+        "bankAccountDetails": { "type": "string", "maxLength": 1000 },
+        "paymentQrDataUrl": { "type": "string", "maxLength": 250000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name", "title", "avatarUrl", "currencySymbol", "monthlyBudget", "createdAt", "updatedAt"]
+    },
+    "UserPreferences": {
+      "title": "User Preferences",
+      "description": "Theme preference, custom note categories, and workspace initialization flag.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "theme": { "type": "string", "enum": ["dark", "light"], "maxLength": 10 },
+        "noteCategories": { "type": "array", "description": "Up to 50 category labels" },
+        "initialized": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "theme", "noteCategories", "initialized", "createdAt", "updatedAt"]
+    },
+    "FinancialAccount": {
+      "title": "Financial Account",
+      "description": "Bank, e-wallet, or physical cash account with initial balance.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "type": { "type": "string", "enum": ["bank", "ewallet", "cash"], "maxLength": 16 },
+        "initialBalance": { "type": "number" },
+        "accountNumber": { "type": "string", "maxLength": 64 },
+        "color": { "type": "string", "maxLength": 32 },
+        "coaCode": { "type": "string", "maxLength": 32 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "name", "type", "initialBalance", "createdAt", "updatedAt"]
+    },
+    "FinanceTransaction": {
+      "title": "Finance Transaction",
+      "description": "Income, expense, transfer, or COA adjustment record supporting backdate and audit voiding.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["income", "expense"], "maxLength": 16 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "amount": { "type": "number" },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "date": { "type": "string", "minLength": 8, "maxLength": 20 },
+        "paymentMethod": { "type": "string", "enum": ["Bank Transfer", "E-Wallet", "Cash", "Credit Card"], "maxLength": 32 },
+        "walletType": { "type": "string", "enum": ["cash", "non_cash"], "maxLength": 16 },
+        "accountName": { "type": "string", "maxLength": 120 },
+        "accountId": { "type": "string", "maxLength": 128 },
+        "relatedDebtId": { "type": "string", "maxLength": 128 },
+        "transferId": { "type": "string", "maxLength": 128 },
+        "transferType": { "type": "string", "maxLength": 32 },
+        "targetAccountId": { "type": "string", "maxLength": 128 },
+        "targetAccountName": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "debitAccountCode": { "type": "string", "maxLength": 32 },
+        "debitAccountName": { "type": "string", "maxLength": 160 },
+        "creditAccountCode": { "type": "string", "maxLength": 32 },
+        "creditAccountName": { "type": "string", "maxLength": 160 },
+        "isAdjustment": { "type": "boolean" },
+        "coaCode": { "type": "string", "maxLength": 32 },
+        "coaName": { "type": "string", "maxLength": 160 },
+        "isVoided": { "type": "boolean" },
+        "voidedAt": { "type": "string", "maxLength": 64 },
+        "voidReason": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "type", "title", "amount", "category", "date", "paymentMethod", "walletType", "createdAt", "updatedAt"]
+    },
+    "DebtReceivable": {
+      "title": "Debt Receivable",
+      "description": "Money owed to the user with WhatsApp/PDF invoicing and payment QR attachment.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "debtorName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "debtorPhone": { "type": "string", "maxLength": 32 },
+        "debtorEmail": { "type": "string", "maxLength": 254 },
+        "amount": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "dueDate": { "type": "string", "maxLength": 20 },
+        "issuedDate": { "type": "string", "maxLength": 20 },
+        "description": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["unpaid", "partial", "paid"], "maxLength": 16 },
+        "invoiceNumber": { "type": "string", "maxLength": 64 },
+        "sourceAccountId": { "type": "string", "maxLength": 128 },
+        "sourceAccountName": { "type": "string", "maxLength": 120 },
+        "deductFromAccount": { "type": "boolean" },
+        "disbursementTransactionId": { "type": "string", "maxLength": 128 },
+        "qrImageDataUrl": { "type": "string", "maxLength": 250000 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "debtorName", "amount", "amountPaid", "dueDate", "issuedDate", "description", "status", "invoiceNumber", "createdAt", "updatedAt"]
+    },
+    "MyDebtLiability": {
+      "title": "My Debt Liability",
+      "description": "User liabilities, PayLater installments, or credit obligations.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "creditorName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "description": { "type": "string", "maxLength": 500 },
+        "amount": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "dueDate": { "type": "string", "maxLength": 20 },
+        "issuedDate": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["unpaid", "partial", "paid"], "maxLength": 16 },
+        "sourceTransactionId": { "type": "string", "maxLength": 128 },
+        "sourceAccountId": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "maxLength": 80 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "creditorName", "description", "amount", "amountPaid", "dueDate", "issuedDate", "status", "createdAt", "updatedAt"]
+    },
+    "CategoryBudget": {
+      "title": "Category Budget",
+      "description": "Monthly expense budget limit per transaction category.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "limit": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "category", "limit", "createdAt", "updatedAt"]
+    },
+    "TodoItem": {
+      "title": "Todo Item",
+      "description": "Task item with priority, due date, category, tags, and subtasks.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "dueDate": { "type": "string", "maxLength": 20 },
+        "dueTime": { "type": "string", "maxLength": 16 },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"], "maxLength": 16 },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "completed"], "maxLength": 16 },
+        "category": { "type": "string", "maxLength": 80 },
+        "tags": { "type": "array" },
+        "subtasks": { "type": "array" },
+        "completedAt": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "title", "dueDate", "priority", "status", "category", "tags", "createdAt", "updatedAt"]
+    },
+    "NoteItem": {
+      "title": "Note Item",
+      "description": "Markdown knowledge base document.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "content": { "type": "string", "maxLength": 100000 },
+        "category": { "type": "string", "maxLength": 80 },
+        "tags": { "type": "array" },
+        "isPinned": { "type": "boolean" },
+        "clientUpdatedAt": { "type": "string", "maxLength": 64 },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "title", "content", "category", "tags", "isPinned", "createdAt", "updatedAt"]
+    },
+    "HabitItem": {
+      "title": "Habit Item",
+      "description": "Daily consistency habit tracker record.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "targetPerWeek": { "type": "number" },
+        "completedDays": { "type": "array" },
+        "color": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "title", "targetPerWeek", "completedDays", "color", "createdAt", "updatedAt"]
+    },
+    "LogbookEntry": {
+      "title": "Work Logbook Entry",
+      "description": "Daily work logbook activity entry exportable to Excel.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "maxLength": 20 },
+        "project": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "hours": { "type": "number" },
+        "category": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["Completed", "In Progress"], "maxLength": 24 },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "date", "project", "hours", "category", "description", "status", "createdAt", "updatedAt"]
+    },
+    "SavedBarcode": {
+      "title": "Saved QR or Barcode",
+      "description": "Persisted QR code or barcode generated in Barcode Studio.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["qr", "barcode"], "maxLength": 16 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "dataUrl": { "type": "string", "maxLength": 250000 },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "type", "text", "title", "createdAt", "updatedAt"]
+    },
+    "ReimbursementItem": {
+      "title": "Project Reimbursement Claim",
+      "description": "Project reimbursement claim with WD/WE rates and selected calendar dates.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "no": { "type": "number" },
+        "submissionDate": { "type": "string", "maxLength": 20 },
+        "property": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "typeProject": { "type": "string", "enum": ["Onsite", "Online"], "maxLength": 16 },
+        "role": { "type": "string", "enum": ["M", "TPM", "PM"], "maxLength": 8 },
+        "startDate": { "type": "string", "maxLength": 20 },
+        "endDate": { "type": "string", "maxLength": 20 },
+        "wdDays": { "type": "number" },
+        "weDays": { "type": "number" },
+        "totalDays": { "type": "number" },
+        "description": { "type": "string", "maxLength": 500 },
+        "wdRate": { "type": "number" },
+        "weRate": { "type": "number" },
+        "wdAmount": { "type": "number" },
+        "weAmount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Draft", "Submitted", "Approved", "Done", "Rejected"], "maxLength": 16 },
+        "deliveryDate": { "type": "string", "maxLength": 40 },
+        "paymentAccountId": { "type": "string", "maxLength": 128 },
+        "selectedDates": { "type": "array" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "no", "submissionDate", "property", "typeProject", "role", "startDate", "endDate", "wdDays", "weDays", "totalDays", "description", "wdRate", "weRate", "wdAmount", "weAmount", "totalAmount", "status", "createdAt", "updatedAt"]
+    },
+    "ReimburseRate": {
+      "title": "Reimbursement Rate",
+      "description": "Configurable WD/WE rate matrix entry.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["M", "TPM", "PM"], "maxLength": 8 },
+        "type": { "type": "string", "enum": ["Onsite", "Online"], "maxLength": 16 },
+        "wdRate": { "type": "number" },
+        "weRate": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "id", "role", "type", "wdRate", "weRate", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserRoot" },
+      "description": "Authenticated user's master anchor document."
+    },
+    "/users/{userId}/profile/{profileId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile, payment details, and invoice QR image."
+    },
+    "/users/{userId}/preferences/{prefId}": {
+      "schema": { "$ref": "#/entities/UserPreferences" },
+      "description": "User workspace preferences and cloud initialization metadata."
+    },
+    "/users/{userId}/accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/FinancialAccount" },
+      "description": "User bank, e-wallet, and cash accounts."
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/FinanceTransaction" },
+      "description": "User cashflow transactions, transfers, and COA adjustments."
+    },
+    "/users/{userId}/debts/{debtId}": {
+      "schema": { "$ref": "#/entities/DebtReceivable" },
+      "description": "Money owed to the user and invoice metadata."
+    },
+    "/users/{userId}/myDebts/{myDebtId}": {
+      "schema": { "$ref": "#/entities/MyDebtLiability" },
+      "description": "User payables, PayLater, and credit liabilities."
+    },
+    "/users/{userId}/categoryBudgets/{budgetId}": {
+      "schema": { "$ref": "#/entities/CategoryBudget" },
+      "description": "Monthly spending caps per expense category."
+    },
+    "/users/{userId}/todos/{todoId}": {
+      "schema": { "$ref": "#/entities/TodoItem" },
+      "description": "User task list items."
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/NoteItem" },
+      "description": "User Markdown knowledge notes."
+    },
+    "/users/{userId}/habits/{habitId}": {
+      "schema": { "$ref": "#/entities/HabitItem" },
+      "description": "User daily habit tracker items."
+    },
+    "/users/{userId}/logbook/{entryId}": {
+      "schema": { "$ref": "#/entities/LogbookEntry" },
+      "description": "User daily work logbook entries."
+    },
+    "/users/{userId}/barcodes/{barcodeId}": {
+      "schema": { "$ref": "#/entities/SavedBarcode" },
+      "description": "Saved QR codes and barcodes."
+    },
+    "/users/{userId}/reimbursements/{reimburseId}": {
+      "schema": { "$ref": "#/entities/ReimbursementItem" },
+      "description": "Project reimbursement claims."
+    },
+    "/users/{userId}/reimburseRates/{rateId}": {
+      "schema": { "$ref": "#/entities/ReimburseRate" },
+      "description": "Reimbursement WD/WE rate matrix."
+    }
+  }
+}
