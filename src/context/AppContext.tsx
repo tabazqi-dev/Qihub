@@ -8,14 +8,17 @@ import {
 } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
 import { isContraVoidTransaction } from '../utils/accounting';
+import { getDebtLineItems, sanitizeSafeImageSrc } from '../utils/debtItems';
 import {
   NavigationTab,
   TodoItem,
   FinanceTransaction,
   DebtReceivable,
+  DebtLineItem,
   CategoryBudget,
   NoteItem,
   UserProfile,
+  AuthUser,
   HabitItem,
   FinancialAccount,
   MyDebtLiability,
@@ -43,10 +46,14 @@ export type SyncStatus = 'local' | 'syncing' | 'synced' | 'error';
 interface AppContextType {
   // Cloud Sync & Auth
   user: User | null;
+  authUser: AuthUser | null;
   authLoading: boolean;
   syncStatus: SyncStatus;
   signInWithGoogle: () => Promise<void>;
+  signInWithUsernamePassword: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  registerWithUsernamePassword: (username: string, password: string, displayName?: string) => Promise<{ ok: boolean; error?: string }>;
   signOutGoogle: () => Promise<void>;
+  signOutUser: () => Promise<void>;
   pushLocalWorkspaceToCloud: () => Promise<void>;
 
   activeTab: NavigationTab;
@@ -163,6 +170,8 @@ const SEED_PROFILE: UserProfile = {
   name: 'Alif Pratama',
   title: 'Lead Product Engineer & Creative Tech',
   avatarUrl: '/src/assets/images/user_avatar_1793517278515.jpg',
+  appName: "Q'Hub",
+  appLogoUrl: undefined,
   currencySymbol: 'Rp',
   monthlyBudget: 15000000,
   bankAccountDetails: 'BCA: 873-049-2189 a/n Alif Pratama\nMandiri: 137-00-1982736-1\nGoPay/OVO: 0812-8899-7721'
@@ -614,10 +623,28 @@ function sanitizeImageDataUrl(val: string | undefined, maxLen = 245000): string 
   return val.length <= maxLen ? val : undefined;
 }
 
+function readStoredBranding(): { appName?: string; appLogoUrl?: string } {
+  try {
+    const raw = localStorage.getItem('omnihub_branding');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return {
+      appName: typeof parsed?.appName === 'string' && parsed.appName.trim() ? parsed.appName.trim() : undefined,
+      appLogoUrl: sanitizeSafeImageSrc(parsed?.appLogoUrl),
+    };
+  } catch {
+    return {};
+  }
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
+  const localTokenRef = useRef<string | null>(null);
+  const authUserRef = useRef<AuthUser | null>(null);
+  authUserRef.current = authUser;
   const dbConfiguredRef = useRef<boolean>(true);
   const lastSyncedAtRef = useRef<number>(0);
 
@@ -629,8 +656,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [profile, setProfile] = useState<UserProfile>(() => {
+    const branding = readStoredBranding();
     const saved = localStorage.getItem('omnihub_profile');
-    return saved ? JSON.parse(saved) : SEED_PROFILE;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          ...SEED_PROFILE,
+          ...parsed,
+          appName: parsed.appName || branding.appName || SEED_PROFILE.appName,
+          appLogoUrl: sanitizeSafeImageSrc(parsed.appLogoUrl) || branding.appLogoUrl,
+        };
+      } catch {
+        // fallback below
+      }
+    }
+    return {
+      ...SEED_PROFILE,
+      appName: branding.appName || SEED_PROFILE.appName,
+      appLogoUrl: branding.appLogoUrl,
+    };
   });
 
   const [accounts, setAccounts] = useState<FinancialAccount[]>(() => {
@@ -804,6 +849,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem('omnihub_reimbursements', JSON.stringify(reimbursements)); }, [reimbursements]);
   useEffect(() => { localStorage.setItem('omnihub_reimburse_rates', JSON.stringify(reimburseRates)); }, [reimburseRates]);
 
+  useEffect(() => {
+    const appTitle = profile.appName?.trim() || "Q'Hub";
+    document.title = `${appTitle} - Personal Super App & Management Suite`;
+    try {
+      localStorage.setItem('omnihub_branding', JSON.stringify({
+        appName: appTitle,
+        appLogoUrl: sanitizeSafeImageSrc(profile.appLogoUrl) || undefined,
+      }));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [profile.appName, profile.appLogoUrl]);
+
   const showToast = (message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info') => {
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
     setToasts(prev => [...prev, { id, message, type }]);
@@ -816,13 +874,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const hasActiveSession = () => Boolean(localTokenRef.current || auth.currentUser);
+
   // ==================== POSTGRESQL API SYNC HELPERS ====================
   const apiFetch = async <T = any>(path: string, init?: RequestInit): Promise<T> => {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
+    let token = localTokenRef.current;
+    if (!token && auth.currentUser) {
+      token = await auth.currentUser.getIdToken();
+    }
+    if (!token) {
       throw new ApiRequestError(401, 'Pengguna belum masuk.', 'UNAUTHENTICATED');
     }
-    const token = await currentUser.getIdToken();
     const res = await fetch(path, {
       ...init,
       headers: {
@@ -854,11 +916,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setProfile({
         name: ws.profile.name || SEED_PROFILE.name,
         title: ws.profile.title || '',
-        avatarUrl: ws.profile.avatarUrl || SEED_PROFILE.avatarUrl,
+        avatarUrl: sanitizeSafeImageSrc(ws.profile.avatarUrl) || SEED_PROFILE.avatarUrl,
+        appName: ws.profile.appName || SEED_PROFILE.appName,
+        appLogoUrl: sanitizeSafeImageSrc(ws.profile.appLogoUrl),
         currencySymbol: ws.profile.currencySymbol || 'Rp',
         monthlyBudget: Number(ws.profile.monthlyBudget) || 0,
         bankAccountDetails: ws.profile.bankAccountDetails || '',
-        paymentQrDataUrl: ws.profile.paymentQrDataUrl || undefined,
+        paymentQrDataUrl: sanitizeSafeImageSrc(ws.profile.paymentQrDataUrl),
       });
     }
     if (ws.preferences) {
@@ -889,27 +953,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (Array.isArray(ws.reimburseRates)) setReimburseRates(ws.reimburseRates);
   };
 
-  const syncFullWorkspaceToPostgres = async (options?: { overwriteExisting?: boolean }) => {
+  const syncFullWorkspaceToPostgres = async (options?: { overwriteExisting?: boolean; overrideWorkspace?: Record<string, unknown> }) => {
     const overwriteExisting = options?.overwriteExisting ?? true;
     await apiFetch('/api/workspace/sync', {
       method: 'POST',
       body: JSON.stringify({
         overwriteExisting,
-        workspace: latestStateRef.current,
+        workspace: options?.overrideWorkspace ?? latestStateRef.current,
       }),
     });
     dbConfiguredRef.current = true;
     lastSyncedAtRef.current = Date.now();
   };
 
-  const loadWorkspaceFromPostgres = async (options?: { silent?: boolean }) => {
-    if (!auth.currentUser) return;
+  const loadWorkspaceFromPostgres = async (options?: { silent?: boolean; seedStateOverride?: Record<string, unknown> }) => {
+    if (!hasActiveSession()) return;
     if (!options?.silent) setSyncStatus('syncing');
     try {
       const data = await apiFetch<{ initialized: boolean; workspace: any }>('/api/workspace');
       dbConfiguredRef.current = true;
       if (!data.initialized) {
-        await syncFullWorkspaceToPostgres({ overwriteExisting: false });
+        await syncFullWorkspaceToPostgres({ overwriteExisting: false, overrideWorkspace: options?.seedStateOverride });
       } else {
         applyWorkspaceSnapshot(data.workspace);
       }
@@ -930,7 +994,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const cloudWriteDoc = async (colName: string, id: string, data: Record<string, unknown>) => {
-    if (!auth.currentUser || !dbConfiguredRef.current) return;
+    if (!hasActiveSession() || !dbConfiguredRef.current) return;
     setSyncStatus('syncing');
     try {
       await apiFetch(`/api/workspace/${encodeURIComponent(colName)}`, {
@@ -952,7 +1016,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const cloudUpdateDoc = async (colName: string, id: string, updates: Record<string, unknown>) => {
-    if (!auth.currentUser || !dbConfiguredRef.current) return;
+    if (!hasActiveSession() || !dbConfiguredRef.current) return;
     setSyncStatus('syncing');
     try {
       if (colName === 'profile') {
@@ -986,7 +1050,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const cloudDeleteDoc = async (colName: string, id: string) => {
-    if (!auth.currentUser || !dbConfiguredRef.current) return;
+    if (!hasActiveSession() || !dbConfiguredRef.current) return;
     setSyncStatus('syncing');
     try {
       await apiFetch(`/api/workspace/${encodeURIComponent(colName)}/${encodeURIComponent(id)}`, {
@@ -1013,12 +1077,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
         setUser(null);
+        // Only clear authUser if not currently signed in with local username/password
+        if (!localTokenRef.current) {
+          setAuthUser(null);
+          setSyncStatus('local');
+        }
         setAuthLoading(false);
-        setSyncStatus('local');
         return;
       }
 
+      localTokenRef.current = null;
       setUser(firebaseUser);
+      setAuthUser({
+        uid: firebaseUser.uid,
+        email: firebaseUser.email || undefined,
+        displayName: firebaseUser.displayName || firebaseUser.email || 'Pengguna Google',
+        authType: 'google',
+      });
       setAuthLoading(false);
       dbConfiguredRef.current = true;
       if (!cancelled) {
@@ -1028,7 +1103,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const handleResumeSync = () => {
       if (
-        !auth.currentUser ||
+        !hasActiveSession() ||
         !dbConfiguredRef.current ||
         document.visibilityState === 'hidden'
       ) {
@@ -1065,19 +1140,157 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const signOutGoogle = async () => {
+  const resetPrivateWorkspaceToDefaults = () => {
+    const branding = readStoredBranding();
+    const defaultProfile: UserProfile = {
+      ...SEED_PROFILE,
+      appName: branding.appName || SEED_PROFILE.appName,
+      appLogoUrl: branding.appLogoUrl,
+    };
+    const defaultNoteCategories = Array.from(new Set([...SEED_NOTE_CATEGORIES, ...SEED_NOTES.map(n => n.category)]));
+    const defaultLogbook: LogbookEntry[] = [
+      {
+        id: 'log-1',
+        date: new Date().toISOString().split('T')[0],
+        project: "Q'Hub Super App Development",
+        hours: 8,
+        category: 'Development',
+        description: 'Membangun modul logbook kerja dan integrasi export Excel (.xls).',
+        status: 'Completed',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    setProfile(defaultProfile);
+    setAccounts(SEED_ACCOUNTS);
+    setTodos(SEED_TODOS);
+    setTransactions(SEED_TRANSACTIONS);
+    setDebts(SEED_DEBTS);
+    setMyDebts(SEED_MY_DEBTS);
+    setDailyAudits([]);
+    setCategoryBudgets(SEED_CATEGORY_BUDGETS);
+    setNotes(SEED_NOTES);
+    setNoteCategories(defaultNoteCategories);
+    setHabits(SEED_HABITS);
+    setLogbookEntries(defaultLogbook);
+    setSavedBarcodes([]);
+    setReimbursements(SEED_REIMBURSEMENTS);
+    setReimburseRates(DEFAULT_REIMBURSE_RATES);
+
+    return {
+      profile: defaultProfile,
+      theme,
+      noteCategories: defaultNoteCategories,
+      accounts: SEED_ACCOUNTS,
+      transactions: SEED_TRANSACTIONS,
+      debts: SEED_DEBTS,
+      myDebts: SEED_MY_DEBTS,
+      categoryBudgets: SEED_CATEGORY_BUDGETS,
+      todos: SEED_TODOS,
+      notes: SEED_NOTES,
+      habits: SEED_HABITS,
+      logbookEntries: defaultLogbook,
+      savedBarcodes: [],
+      reimbursements: SEED_REIMBURSEMENTS,
+      reimburseRates: DEFAULT_REIMBURSE_RATES,
+    };
+  };
+
+  const signInWithUsernamePassword = async (
+    username: string,
+    password: string
+  ): Promise<{ ok: boolean; error?: string }> => {
     try {
-      await signOut(auth);
+      setSyncStatus('syncing');
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.token || !data?.user) {
+        setSyncStatus('local');
+        const msg = data?.message || data?.error || 'Username atau password salah.';
+        return { ok: false, error: msg };
+      }
+
+      if (auth.currentUser) {
+        await signOut(auth).catch(() => {});
+      }
+      localTokenRef.current = data.token;
+      dbConfiguredRef.current = true;
+      setUser(null);
+      setAuthUser(data.user as AuthUser);
+      await loadWorkspaceFromPostgres();
+      showToast(`Selamat datang kembali, ${data.user.displayName}!`, 'success');
+      return { ok: true };
+    } catch {
       setSyncStatus('local');
-      showToast('Berhasil keluar dari akun Google. Aplikasi kembali ke mode penyimpanan lokal.', 'info');
+      return { ok: false, error: 'Tidak dapat terhubung ke server login.' };
+    }
+  };
+
+  const registerWithUsernamePassword = async (
+    username: string,
+    password: string,
+    displayName?: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      setSyncStatus('syncing');
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, displayName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.token || !data?.user) {
+        setSyncStatus('local');
+        const msg = data?.message || data?.error || 'Gagal mendaftar akun baru.';
+        return { ok: false, error: msg };
+      }
+
+      if (auth.currentUser) {
+        await signOut(auth).catch(() => {});
+      }
+      const cleanSeed = resetPrivateWorkspaceToDefaults();
+      cleanSeed.profile = { ...cleanSeed.profile, name: data.user.displayName };
+      setProfile(cleanSeed.profile);
+
+      localTokenRef.current = data.token;
+      dbConfiguredRef.current = true;
+      setUser(null);
+      setAuthUser(data.user as AuthUser);
+      await loadWorkspaceFromPostgres({ seedStateOverride: cleanSeed });
+      showToast(`Akun @${data.user.username} berhasil dibuat & terhubung ke PostgreSQL!`, 'success');
+      return { ok: true };
+    } catch {
+      setSyncStatus('local');
+      return { ok: false, error: 'Tidak dapat terhubung ke server registrasi.' };
+    }
+  };
+
+  const signOutUser = async () => {
+    try {
+      localTokenRef.current = null;
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+      setUser(null);
+      setAuthUser(null);
+      setSyncStatus('local');
+      resetPrivateWorkspaceToDefaults();
+      setActiveTab('dashboard');
+      showToast('Anda telah keluar dari akun.', 'info');
     } catch (err: any) {
       showToast(`Gagal keluar: ${err?.message || 'Error'}`, 'error');
     }
   };
 
+  const signOutGoogle = signOutUser;
+
   const pushLocalWorkspaceToCloud = async () => {
-    if (!auth.currentUser) {
-      showToast('Silakan login Google terlebih dahulu untuk sinkronisasi ke PostgreSQL.', 'warning');
+    if (!hasActiveSession()) {
+      showToast('Silakan masuk terlebih dahulu untuk sinkronisasi ke PostgreSQL.', 'warning');
       return;
     }
     setSyncStatus('syncing');
@@ -1102,26 +1315,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-    if (auth.currentUser) {
+    if (hasActiveSession()) {
       void cloudUpdateDoc('preferences', 'main', { theme: nextTheme });
     }
   };
 
   const updateProfile = (updates: Partial<UserProfile>) => {
     const cleanedUpdates: Partial<UserProfile> = { ...updates };
-    if (cleanedUpdates.avatarUrl && cleanedUpdates.avatarUrl.length > 245000) {
-      showToast('Ukuran foto terlalu besar, gunakan foto yang lebih kecil.', 'warning');
-      delete cleanedUpdates.avatarUrl;
+    if (cleanedUpdates.avatarUrl !== undefined) {
+      const safeAvatar = sanitizeSafeImageSrc(cleanedUpdates.avatarUrl);
+      if (cleanedUpdates.avatarUrl && !safeAvatar) {
+        showToast('Format atau ukuran foto profil tidak valid.', 'warning');
+        delete cleanedUpdates.avatarUrl;
+      } else if (safeAvatar) {
+        cleanedUpdates.avatarUrl = safeAvatar;
+      }
     }
-    if (cleanedUpdates.paymentQrDataUrl && cleanedUpdates.paymentQrDataUrl.length > 245000) {
-      showToast('Ukuran QR Code terlalu besar, gunakan gambar yang lebih kecil.', 'warning');
-      delete cleanedUpdates.paymentQrDataUrl;
+    if ('appLogoUrl' in cleanedUpdates) {
+      if (!cleanedUpdates.appLogoUrl) {
+        cleanedUpdates.appLogoUrl = undefined;
+      } else {
+        const safeLogo = sanitizeSafeImageSrc(cleanedUpdates.appLogoUrl);
+        if (!safeLogo) {
+          showToast('Format atau ukuran logo aplikasi tidak valid.', 'warning');
+          delete cleanedUpdates.appLogoUrl;
+        } else {
+          cleanedUpdates.appLogoUrl = safeLogo;
+        }
+      }
+    }
+    if (cleanedUpdates.paymentQrDataUrl !== undefined) {
+      if (!cleanedUpdates.paymentQrDataUrl) {
+        cleanedUpdates.paymentQrDataUrl = undefined;
+      } else {
+        const safeQr = sanitizeSafeImageSrc(cleanedUpdates.paymentQrDataUrl);
+        if (!safeQr) {
+          showToast('Ukuran atau format QR Code tidak valid.', 'warning');
+          delete cleanedUpdates.paymentQrDataUrl;
+        } else {
+          cleanedUpdates.paymentQrDataUrl = safeQr;
+        }
+      }
     }
     setProfile(prev => ({ ...prev, ...cleanedUpdates }));
-    if (auth.currentUser) {
-      void cloudUpdateDoc('profile', 'main', cleanedUpdates as Record<string, unknown>);
+    if (hasActiveSession()) {
+      const cloudPayload: Record<string, unknown> = { ...cleanedUpdates };
+      if ('appLogoUrl' in cleanedUpdates && !cleanedUpdates.appLogoUrl) {
+        cloudPayload.appLogoUrl = '';
+      }
+      if ('paymentQrDataUrl' in cleanedUpdates && !cleanedUpdates.paymentQrDataUrl) {
+        cloudPayload.paymentQrDataUrl = '';
+      }
+      void cloudUpdateDoc('profile', 'main', cloudPayload);
     }
-    showToast('Profil dan informasi pembayaran diperbarui', 'success');
+    showToast('Profil & pengaturan aplikasi diperbarui', 'success');
   };
 
   // Todo operations
@@ -1667,6 +1914,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    const initialItems: DebtLineItem[] =
+      Array.isArray(debt.items) && debt.items.length > 0
+        ? debt.items
+        : [
+            {
+              id: 'di-' + baseTs,
+              description: debt.description || 'Pinjaman / Tagihan Jasa',
+              amount: debt.amount,
+              date: debt.issuedDate || new Date().toISOString().split('T')[0],
+            },
+          ];
+
     const newDebt: DebtReceivable = {
       ...debt,
       id,
@@ -1675,7 +1934,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sourceAccountName: chosenAccName,
       deductFromAccount: !!deductFromAccount,
       disbursementTransactionId: disbursementTxId,
-      qrImageDataUrl: sanitizeImageDataUrl(debt.qrImageDataUrl)
+      qrImageDataUrl: sanitizeSafeImageSrc(debt.qrImageDataUrl),
+      items: initialItems,
     };
 
     setDebts(prev => [newDebt, ...prev]);
@@ -1690,8 +1950,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateDebt = (id: string, updates: Partial<DebtReceivable>) => {
     const cleanUpdates = { ...updates };
-    if (cleanUpdates.qrImageDataUrl && cleanUpdates.qrImageDataUrl.length > 245000) {
-      showToast('Ukuran gambar QR terlalu besar.', 'warning');
+    if (cleanUpdates.qrImageDataUrl && !sanitizeSafeImageSrc(cleanUpdates.qrImageDataUrl)) {
+      showToast('Ukuran atau format gambar QR tidak valid.', 'warning');
       delete cleanUpdates.qrImageDataUrl;
     }
     setDebts(prev => prev.map(d => d.id === id ? { ...d, ...cleanUpdates } : d));
@@ -1703,6 +1963,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = debts.find(d => d.id === id);
     if (!target || addedAmount <= 0) return;
 
+    const existingItems = getDebtLineItems(target);
+    const addedItem: DebtLineItem = {
+      id: 'di-' + Date.now(),
+      description: notes?.trim() || 'Tambahan Piutang',
+      amount: addedAmount,
+      date: new Date().toISOString().split('T')[0],
+    };
+    const nextItems = [...existingItems, addedItem];
+
     const nextAmount = target.amount + addedAmount;
     const nextStatus = target.amountPaid >= nextAmount ? 'paid' : target.amountPaid > 0 ? 'partial' : 'unpaid';
     const nextDueDate = newDueDate || target.dueDate;
@@ -1712,7 +1981,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setDebts(prev => prev.map(d => (
       d.id === id
-        ? { ...d, amount: nextAmount, status: nextStatus, dueDate: nextDueDate, notes: extraNote }
+        ? { ...d, amount: nextAmount, status: nextStatus, dueDate: nextDueDate, notes: extraNote, items: nextItems }
         : d
     )));
 
@@ -1720,7 +1989,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       amount: nextAmount,
       status: nextStatus,
       dueDate: nextDueDate,
-      notes: extraNote
+      notes: extraNote,
+      items: nextItems,
     });
     showToast(`Nominal piutang ${target.debtorName} bertambah Rp ${addedAmount.toLocaleString('id-ID')}`, 'success');
   };
@@ -2080,9 +2350,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (Array.isArray(data.reimbursements)) setReimbursements(data.reimbursements);
       if (Array.isArray(data.reimburseRates)) setReimburseRates(data.reimburseRates);
 
-      if (auth.currentUser) {
+      if (hasActiveSession()) {
         setTimeout(() => {
-          if (auth.currentUser) {
+          if (hasActiveSession()) {
             void syncFullWorkspaceToPostgres({ overwriteExisting: true }).catch((err) => {
               if (!(err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED')) {
                 console.error('Error syncing imported backup:', err);
@@ -2116,10 +2386,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider
       value={{
         user,
+        authUser,
         authLoading,
         syncStatus,
         signInWithGoogle,
+        signInWithUsernamePassword,
+        registerWithUsernamePassword,
         signOutGoogle,
+        signOutUser,
         pushLocalWorkspaceToCloud,
         activeTab,
         setActiveTab,

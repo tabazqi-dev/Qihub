@@ -1,6 +1,7 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { NavigationTab } from '../../types';
+import { sanitizeSafeImageSrc } from '../../utils/debtItems';
 import { 
   LayoutDashboard, 
   CalendarCheck, 
@@ -18,7 +19,8 @@ import {
   X,
   ClipboardList,
   Cloud,
-  CloudOff
+  CloudOff,
+  LogOut
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -43,7 +45,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   onOpenSettings
 }) => {
-  const { activeTab, setActiveTab, todos, debts, reimbursements, profile, user, syncStatus } = useApp();
+  const { activeTab, setActiveTab, todos, debts, reimbursements, profile, authUser, syncStatus, signOutUser } = useApp();
+  const appName = profile.appName?.trim() || "Q'Hub";
 
   const pendingTodosCount = todos.filter(t => t.status !== 'completed').length;
   const pendingDebtsCount = debts.filter(d => d.status !== 'paid').length;
@@ -88,14 +91,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold text-base shadow-sm shrink-0">
-              Ω
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold text-base shadow-sm shrink-0 overflow-hidden">
+              {sanitizeSafeImageSrc(profile.appLogoUrl) ? (
+                <img
+                  src={sanitizeSafeImageSrc(profile.appLogoUrl)}
+                  alt={appName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>Ω</span>
+              )}
             </div>
             {(!isCollapsed || isOpenMobile) && (
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-sm tracking-tight text-neutral-900 dark:text-neutral-100 truncate">
-                    Q'Hub
+                    {appName}
                   </span>
                   <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-mono text-[9px] font-bold">
                     v3.0.0
@@ -189,7 +200,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="relative shrink-0">
               <img
                 key={profile.avatarUrl}
-                src={profile.avatarUrl}
+                src={sanitizeSafeImageSrc(profile.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg'}
                 alt={profile.name}
                 referrerPolicy="no-referrer"
                 className="w-9 h-9 rounded-full object-cover ring-1 ring-neutral-300 dark:ring-neutral-700"
@@ -209,10 +220,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {profile.name}
                 </p>
                 <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate flex items-center gap-1">
-                  {user ? (
+                  {authUser ? (
                     <>
                       <Cloud className="w-3 h-3 text-emerald-500 shrink-0" />
-                      <span className="truncate">{syncStatus === 'syncing' ? 'Menyinkron...' : user.email}</span>
+                      <span className="truncate">
+                        {syncStatus === 'syncing'
+                          ? 'Menyinkron...'
+                          : authUser.authType === 'local'
+                            ? `@${authUser.username}`
+                            : (authUser.email || authUser.displayName)}
+                      </span>
                     </>
                   ) : (
                     <>
@@ -225,22 +242,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
 
             {(!isCollapsed || isOpenMobile) && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenSettings();
-                }}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors cursor-pointer"
-                title="Buka Pengaturan & Cloud Sync"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenSettings();
+                  }}
+                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors cursor-pointer"
+                  title="Buka Pengaturan, Logo & Akun"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void signOutUser();
+                  }}
+                  className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer"
+                  title="Keluar Akun"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
           {(!isCollapsed || isOpenMobile) && (
             <div className="pt-2 text-center">
               <span className="text-[10px] text-neutral-400 font-mono">
-                Q'Hub v3.0.0 • Enterprise Edition
+                {appName} v3.0.0 • Enterprise Edition
               </span>
             </div>
           )}

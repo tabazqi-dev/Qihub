@@ -2,9 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
 import { useApp } from '../../context/AppContext';
 import { compressImageDataUrl } from '../../utils/imageCompress';
+import { getDebtLineItems } from '../../utils/debtItems';
 import {
   FinanceTransaction,
   DebtReceivable,
+  DebtLineItem,
   MyDebtLiability,
   FinancialAccount,
   WalletType,
@@ -185,14 +187,15 @@ export const FinanceTrackerView: React.FC = () => {
   const [debtorName, setDebtorName] = useState('');
   const [debtorPhone, setDebtorPhone] = useState('');
   const [debtorEmail, setDebtorEmail] = useState('');
-  const [debtAmount, setDebtAmount] = useState('');
+  const [debtLineItems, setDebtLineItems] = useState<{ id: string; description: string; amount: string }[]>([
+    { id: 'item-1', description: '', amount: '' }
+  ]);
   const [debtIssuedDate, setDebtIssuedDate] = useState(() => getOffsetDateStr(0));
   const [debtDueDate, setDebtDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
     return d.toISOString().split('T')[0];
   });
-  const [debtDesc, setDebtDesc] = useState('');
   const [debtNotes, setDebtNotes] = useState('');
   const [debtQrDataUrl, setDebtQrDataUrl] = useState<string>('');
   // Pilihan akun yang dipotong dan akun penerima pelunasan
@@ -209,10 +212,42 @@ export const FinanceTrackerView: React.FC = () => {
   const [editingPhoneDebtId, setEditingPhoneDebtId] = useState<string | null>(null);
   const [editingPhoneValue, setEditingPhoneValue] = useState('');
   const [invoiceModalDebtId, setInvoiceModalDebtId] = useState<string | null>(null);
+  const [selectedCombinedDebtIds, setSelectedCombinedDebtIds] = useState<string[]>([]);
   const invoiceModalDebt = useMemo(
     () => (invoiceModalDebtId ? debts.find(d => d.id === invoiceModalDebtId) || null : null),
     [debts, invoiceModalDebtId]
   );
+
+  const openInvoiceModal = (debtItem: DebtReceivable) => {
+    const normalizedName = debtItem.debtorName.trim().toLowerCase();
+    const sameDebtorOpenDebts =
+      debtItem.status === 'paid'
+        ? [debtItem]
+        : debts.filter(
+            (d) =>
+              d.debtorName.trim().toLowerCase() === normalizedName &&
+              d.status !== 'paid'
+          );
+    const ids = sameDebtorOpenDebts.length > 0 ? sameDebtorOpenDebts.map((d) => d.id) : [debtItem.id];
+    setSelectedCombinedDebtIds(ids.includes(debtItem.id) ? ids : [debtItem.id, ...ids]);
+    setInvoiceModalDebtId(debtItem.id);
+  };
+
+  const debtorSiblingDebts = useMemo(() => {
+    if (!invoiceModalDebt) return [] as DebtReceivable[];
+    const normalizedName = invoiceModalDebt.debtorName.trim().toLowerCase();
+    return debts.filter(
+      (d) =>
+        d.debtorName.trim().toLowerCase() === normalizedName &&
+        (d.id === invoiceModalDebt.id || d.status !== 'paid')
+    );
+  }, [debts, invoiceModalDebt]);
+
+  const combinedInvoiceDebts = useMemo(() => {
+    if (!invoiceModalDebt) return [] as DebtReceivable[];
+    const selected = debtorSiblingDebts.filter((d) => selectedCombinedDebtIds.includes(d.id));
+    return selected.length > 0 ? selected : [invoiceModalDebt];
+  }, [debtorSiblingDebts, selectedCombinedDebtIds, invoiceModalDebt]);
 
   // Month selector for General Ledger P&L
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -573,27 +608,46 @@ export const FinanceTrackerView: React.FC = () => {
     showToast('Template CSV saldo awal berhasil diunduh', 'success');
   };
 
-  // 7. Save Piutang (Debts to Me) with optional QR Image & Back Date
+  // 7. Save Piutang (Debts to Me) with itemized breakdown, optional QR Image & Back Date
   const handleSaveDebt = (e: React.FormEvent) => {
     e.preventDefault();
-    const parsed = parseCurrencyInput(debtAmount);
-    if (!debtorName.trim() || !parsed) return;
+    const issueDate = debtIssuedDate || getOffsetDateStr(0);
+    const parsedItems: DebtLineItem[] = debtLineItems
+      .map((row, idx) => ({
+        id: `di-${Date.now()}-${idx}`,
+        description: row.description.trim() || `Item Tagihan #${idx + 1}`,
+        amount: parseCurrencyInput(row.amount),
+        date: issueDate,
+      }))
+      .filter((item) => item.amount > 0);
+
+    const totalAmount = parsedItems.reduce((sum, item) => sum + item.amount, 0);
+    if (!debtorName.trim() || totalAmount <= 0) {
+      showToast('Lengkapi nama debitur dan minimal 1 nominal piutang.', 'warning');
+      return;
+    }
 
     let cleanPhone = debtorPhone.replace(/[^0-9]/g, '');
     if (cleanPhone.startsWith('0')) {
       cleanPhone = '62' + cleanPhone.substring(1);
     }
 
+    const summaryDescription =
+      parsedItems.length === 1
+        ? parsedItems[0].description
+        : parsedItems.map((it) => it.description).join(', ');
+
     addDebt({
       debtorName: debtorName.trim(),
       debtorPhone: cleanPhone || undefined,
       debtorEmail: debtorEmail.trim() || undefined,
-      amount: parsed,
+      amount: totalAmount,
       amountPaid: 0,
       dueDate: debtDueDate,
-      issuedDate: debtIssuedDate || getOffsetDateStr(0),
-      description: debtDesc.trim() || 'Pinjaman / Tagihan Jasa',
+      issuedDate: issueDate,
+      description: summaryDescription,
       status: 'unpaid',
+      items: parsedItems,
       notes: debtNotes.trim() || undefined,
       qrImageDataUrl: debtQrDataUrl || undefined
     }, debtSourceAccountId || accounts[0]?.id, debtDeductAccount);
@@ -601,8 +655,7 @@ export const FinanceTrackerView: React.FC = () => {
     setDebtorName('');
     setDebtorPhone('');
     setDebtorEmail('');
-    setDebtAmount('');
-    setDebtDesc('');
+    setDebtLineItems([{ id: 'item-1', description: '', amount: '' }]);
     setDebtNotes('');
     setDebtQrDataUrl('');
     setIsAddingDebt(false);
@@ -661,19 +714,53 @@ export const FinanceTrackerView: React.FC = () => {
     }
   };
 
-  // Build WA invoice message
-  const buildInvoiceText = (debtItem: DebtReceivable, hasQr: boolean) => {
-    const sisa = Math.max(0, debtItem.amount - debtItem.amountPaid);
-    return `Halo Kak ${debtItem.debtorName},\n\nMengingatkan tagihan resmi nomor *${debtItem.invoiceNumber}* untuk "${debtItem.description}".\nTotal Tagihan: Rp ${debtItem.amount.toLocaleString('id-ID')}\nSudah Dibayar: Rp ${debtItem.amountPaid.toLocaleString('id-ID')}\n*Sisa Pembayaran: Rp ${sisa.toLocaleString('id-ID')}*\nJatuh Tempo: ${debtItem.dueDate}\n\nPembayaran dapat ditransfer ke:\n${profile.bankAccountDetails || 'Rekening BCA: 8830129841 a/n ' + profile.name}${hasQr ? '\n\n(Atau silakan scan gambar QRIS / QR Code terlampir)' : ''}\n\nTerima kasih atas kerja samanya!\nSalam hangat,\n${profile.name}`;
+  const buildCombinedInvoiceSummary = (primaryDebt: DebtReceivable, includedDebts?: DebtReceivable[]) => {
+    const list = includedDebts && includedDebts.length > 0 ? includedDebts : [primaryDebt];
+    const lineItems = list.flatMap((d) =>
+      getDebtLineItems(d).map((item) => ({
+        ...item,
+        invoiceNumber: d.invoiceNumber,
+      }))
+    );
+    const totalAmount = list.reduce((sum, d) => sum + d.amount, 0);
+    const totalPaid = list.reduce((sum, d) => sum + d.amountPaid, 0);
+    const remaining = Math.max(0, totalAmount - totalPaid);
+    const invoiceNumbers = list.map((d) => d.invoiceNumber).join(', ');
+    const latestDueDate = list
+      .map((d) => d.dueDate)
+      .sort()
+      .slice(-1)[0] || primaryDebt.dueDate;
+    return {
+      list,
+      lineItems,
+      totalAmount,
+      totalPaid,
+      remaining,
+      invoiceNumbers,
+      latestDueDate,
+    };
   };
 
-  const handleOpenWhatsAppWithInvoice = (debtItem: DebtReceivable) => {
+  // Build WA invoice message with detailed line-item breakdown
+  const buildInvoiceText = (debtItem: DebtReceivable, hasQr: boolean, includedDebts?: DebtReceivable[]) => {
+    const summary = buildCombinedInvoiceSummary(debtItem, includedDebts);
+    const rincianLines = summary.lineItems
+      .map(
+        (item, idx) =>
+          `${idx + 1}. ${item.description} — Rp ${item.amount.toLocaleString('id-ID')}`
+      )
+      .join('\n');
+
+    return `Halo Kak ${debtItem.debtorName},\n\nMengingatkan tagihan resmi nomor *${summary.invoiceNumbers}*:\n\n*Rincian Tagihan:*\n${rincianLines}\n\nTotal Tagihan: Rp ${summary.totalAmount.toLocaleString('id-ID')}\nSudah Dibayar: Rp ${summary.totalPaid.toLocaleString('id-ID')}\n*Sisa Pembayaran: Rp ${summary.remaining.toLocaleString('id-ID')}*\nJatuh Tempo: ${summary.latestDueDate}\n\nPembayaran dapat ditransfer ke:\n${profile.bankAccountDetails || 'Rekening BCA: 8830129841 a/n ' + profile.name}${hasQr ? '\n\n(Atau silakan scan gambar QRIS / QR Code terlampir)' : ''}\n\nTerima kasih atas kerja samanya!\nSalam hangat,\n${profile.name}`;
+  };
+
+  const handleOpenWhatsAppWithInvoice = (debtItem: DebtReceivable, includedDebts?: DebtReceivable[]) => {
     if (!debtItem.debtorPhone) {
       showToast('Nomor WhatsApp belum terdaftar. Klik [Edit WA] pada kartu debitur terlebih dahulu.', 'warning');
       return;
     }
     const hasQr = Boolean(debtItem.qrImageDataUrl || profile.paymentQrDataUrl);
-    const text = buildInvoiceText(debtItem, hasQr);
+    const text = buildInvoiceText(debtItem, hasQr, includedDebts);
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text).catch(() => {});
     }
@@ -681,11 +768,11 @@ export const FinanceTrackerView: React.FC = () => {
     showToast('Pesan tagihan dibuka di WhatsApp!', 'success');
   };
 
-  const handleShareQrWithInvoice = async (debtItem: DebtReceivable) => {
+  const handleShareQrWithInvoice = async (debtItem: DebtReceivable, includedDebts?: DebtReceivable[]) => {
     const qrSrc = debtItem.qrImageDataUrl || profile.paymentQrDataUrl;
-    const text = buildInvoiceText(debtItem, Boolean(qrSrc));
+    const text = buildInvoiceText(debtItem, Boolean(qrSrc), includedDebts);
     if (!qrSrc) {
-      handleOpenWhatsAppWithInvoice(debtItem);
+      handleOpenWhatsAppWithInvoice(debtItem, includedDebts);
       return;
     }
     try {
@@ -710,7 +797,7 @@ export const FinanceTrackerView: React.FC = () => {
     }
     // Desktop fallback: download QR image + open WhatsApp
     handleDownloadQrImage(qrSrc, debtItem.invoiceNumber);
-    handleOpenWhatsAppWithInvoice(debtItem);
+    handleOpenWhatsAppWithInvoice(debtItem, includedDebts);
   };
 
   const handleDownloadQrImage = (qrSrc: string, invoiceNo: string) => {
@@ -721,10 +808,12 @@ export const FinanceTrackerView: React.FC = () => {
     showToast('Gambar QR Code diunduh (siap dilampirkan ke WA)', 'info');
   };
 
-  const handleDownloadInvoicePDF = (debtItem: DebtReceivable) => {
+  const handleDownloadInvoicePDF = (debtItem: DebtReceivable, includedDebts?: DebtReceivable[]) => {
     try {
+      const summary = buildCombinedInvoiceSummary(debtItem, includedDebts);
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 20;
 
       // Header Banner
@@ -737,7 +826,7 @@ export const FinanceTrackerView: React.FC = () => {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(203, 213, 225);
-      doc.text(`Nomor Dokumen: ${debtItem.invoiceNumber} • Diterbitkan: ${debtItem.issuedDate}`, margin, 26);
+      doc.text(`Nomor Dokumen: ${summary.invoiceNumbers} • Diterbitkan: ${debtItem.issuedDate}`, margin, 26);
 
       let y = 48;
       // Debtor Info
@@ -755,7 +844,7 @@ export const FinanceTrackerView: React.FC = () => {
 
       y += 5;
       if (debtItem.debtorPhone) doc.text(`WhatsApp: +${debtItem.debtorPhone}`, margin, y);
-      doc.text(profile.title || 'Q\'Hub User', pageWidth / 2 + 10, y);
+      doc.text(profile.title || (profile.appName || "Q'Hub User"), pageWidth / 2 + 10, y);
 
       y += 12;
       doc.setDrawColor(226, 232, 240);
@@ -768,37 +857,60 @@ export const FinanceTrackerView: React.FC = () => {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor(51, 65, 85);
-      doc.text('DESKRIPSI TAGIHAN / LAYANAN', margin + 4, y + 5.5);
-      doc.text('TOTAL', pageWidth - margin - 25, y + 5.5, { align: 'right' });
+      doc.text('NO. & DESKRIPSI TAGIHAN / RINCIAN', margin + 4, y + 5.5);
+      doc.text('NOMINAL', pageWidth - margin - 4, y + 5.5, { align: 'right' });
 
-      y += 14;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9.5);
-      doc.setTextColor(15, 23, 42);
-      doc.text(debtItem.description, margin + 4, y);
-      doc.text(`Rp ${debtItem.amount.toLocaleString('id-ID')}`, pageWidth - margin - 25, y, { align: 'right' });
+      y += 13;
+      summary.lineItems.forEach((item, idx) => {
+        if (y > pageHeight - 75) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor(15, 23, 42);
+        const label = `${idx + 1}. ${item.description}${summary.list.length > 1 ? ` (${item.invoiceNumber})` : ''}`;
+        const wrapped = doc.splitTextToSize(label, pageWidth - margin * 2 - 42);
+        doc.text(wrapped, margin + 4, y);
+        doc.text(`Rp ${item.amount.toLocaleString('id-ID')}`, pageWidth - margin - 4, y, { align: 'right' });
+        const rowHeight = Math.max(7, wrapped.length * 5 + 2);
+        y += rowHeight;
+        doc.setDrawColor(241, 245, 249);
+        doc.line(margin, y - 2, pageWidth - margin, y - 2);
+      });
 
-      y += 16;
+      y += 6;
+      doc.setDrawColor(226, 232, 240);
       doc.line(margin, y, pageWidth - margin, y);
       y += 8;
 
       // Totals
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      doc.text('Sudah Dibayarkan (DP):', pageWidth - margin - 70, y);
-      doc.text(`Rp ${debtItem.amountPaid.toLocaleString('id-ID')}`, pageWidth - margin - 25, y, { align: 'right' });
+      doc.setTextColor(51, 65, 85);
+      doc.text('Total Tagihan:', pageWidth - margin - 75, y);
+      doc.text(`Rp ${summary.totalAmount.toLocaleString('id-ID')}`, pageWidth - margin - 4, y, { align: 'right' });
 
       y += 6;
+      doc.text('Sudah Dibayarkan (DP):', pageWidth - margin - 75, y);
+      doc.text(`Rp ${summary.totalPaid.toLocaleString('id-ID')}`, pageWidth - margin - 4, y, { align: 'right' });
+
+      y += 7;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(225, 29, 72);
-      doc.text('SISA PEMBAYARAN:', pageWidth - margin - 70, y);
-      doc.text(`Rp ${(debtItem.amount - debtItem.amountPaid).toLocaleString('id-ID')}`, pageWidth - margin - 25, y, { align: 'right' });
+      doc.text('SISA PEMBAYARAN:', pageWidth - margin - 75, y);
+      doc.text(`Rp ${summary.remaining.toLocaleString('id-ID')}`, pageWidth - margin - 4, y, { align: 'right' });
 
-      y += 16;
+      y += 14;
       const qrSrc = debtItem.qrImageDataUrl || profile.paymentQrDataUrl;
       const hasValidQr = Boolean(qrSrc && qrSrc.startsWith('data:image/') && !qrSrc.startsWith('data:image/svg+xml'));
       const boxHeight = hasValidQr ? 44 : 26;
+
+      if (y + boxHeight > pageHeight - 15) {
+        doc.addPage();
+        y = 20;
+      }
 
       // Payment instructions box (+ optional embedded QR code on the right)
       doc.setFillColor(248, 250, 252);
@@ -816,7 +928,7 @@ export const FinanceTrackerView: React.FC = () => {
         hasValidQr ? pageWidth - margin * 2 - 46 : pageWidth - margin * 2 - 8
       );
       doc.text(bankLines, margin + 4, y + 14);
-      doc.text(`Batas Akhir Pelunasan: ${debtItem.dueDate}`, margin + 4, y + (hasValidQr ? 32 : 21));
+      doc.text(`Batas Akhir Pelunasan: ${summary.latestDueDate}`, margin + 4, y + (hasValidQr ? 32 : 21));
 
       if (hasValidQr && qrSrc) {
         try {
@@ -1648,13 +1760,14 @@ export const FinanceTrackerView: React.FC = () => {
                 {debts.map((d) => {
                   const sisa = d.amount - d.amountPaid;
                   const isPaid = d.status === 'paid';
+                  const items = getDebtLineItems(d);
 
                   return (
                     <div
                       key={d.id}
                       className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800 flex flex-col md:flex-row md:items-center justify-between gap-4"
                     >
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100">{d.debtorName}</span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
@@ -1664,6 +1777,16 @@ export const FinanceTrackerView: React.FC = () => {
                           </span>
                         </div>
                         <p className="text-xs text-neutral-500 mt-0.5">{d.description}</p>
+                        {items.length > 1 && (
+                          <div className="mt-1.5 space-y-0.5 pl-2.5 border-l-2 border-indigo-300 dark:border-indigo-700">
+                            {items.map((item) => (
+                              <div key={item.id} className="flex items-center justify-between gap-3 text-[11px] text-neutral-600 dark:text-neutral-300">
+                                <span className="truncate">• {item.description}</span>
+                                <span className="font-mono font-semibold shrink-0">Rp {item.amount.toLocaleString('id-ID')}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-400 font-mono mt-1">
                           <span>Invoice: {d.invoiceNumber}</span>
                           <span>•</span>
@@ -1756,7 +1879,7 @@ export const FinanceTrackerView: React.FC = () => {
                         )}
 
                         <button
-                          onClick={() => setInvoiceModalDebtId(d.id)}
+                          onClick={() => openInvoiceModal(d)}
                           className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold flex items-center gap-1 cursor-pointer"
                           title="Pratinjau Tagihan WhatsApp & Gambar QR Code"
                         >
@@ -2760,34 +2883,86 @@ export const FinanceTrackerView: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block font-semibold mb-1">Deskripsi Layanan / Pinjaman</label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Pembuatan Desain UI/UX & Website"
-                  value={debtDesc}
-                  onChange={(e) => setDebtDesc(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
-                />
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block font-semibold">Rincian Item Piutang (Deskripsi & Nominal)</label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDebtLineItems((prev) => [
+                        ...prev,
+                        { id: `item-${Date.now()}-${prev.length + 1}`, description: '', amount: '' },
+                      ])
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 font-semibold text-[11px] cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Tambah Rincian</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {debtLineItems.map((row, idx) => (
+                    <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-7">
+                        <input
+                          type="text"
+                          required
+                          placeholder={idx === 0 ? 'Contoh: Makan siang / Pinjaman' : 'Contoh: Beli sepatu'}
+                          value={row.description}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDebtLineItems((prev) =>
+                              prev.map((r) => (r.id === row.id ? { ...r, description: val } : r))
+                            );
+                          }}
+                          className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
+                        />
+                      </div>
+                      <div className={debtLineItems.length > 1 ? 'col-span-4 relative flex items-center' : 'col-span-5 relative flex items-center'}>
+                        <span className="absolute left-2.5 text-[11px] font-mono text-neutral-400">Rp</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          required
+                          placeholder="100.000"
+                          value={row.amount}
+                          onChange={(e) => {
+                            const formatted = formatCurrencyInput(e.target.value);
+                            setDebtLineItems((prev) =>
+                              prev.map((r) => (r.id === row.id ? { ...r, amount: formatted } : r))
+                            );
+                          }}
+                          className="w-full pl-8 pr-2 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border font-mono font-bold"
+                        />
+                      </div>
+                      {debtLineItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDebtLineItems((prev) => prev.filter((r) => r.id !== row.id))
+                          }
+                          className="col-span-1 p-1.5 text-neutral-400 hover:text-rose-500 flex justify-center cursor-pointer"
+                          title="Hapus rincian item"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50 font-mono">
+                  <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">
+                    Total Piutang ({debtLineItems.length} item):
+                  </span>
+                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                    Rp {debtLineItems.reduce((s, r) => s + parseCurrencyInput(r.amount), 0).toLocaleString('id-ID')}
+                  </span>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-semibold mb-1">Nominal (Rp)</label>
-                  <div className="relative flex items-center">
-                    <span className="absolute left-3 text-xs font-mono text-neutral-400">Rp</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      required
-                      placeholder="3.000.000"
-                      value={debtAmount}
-                      onChange={(e) => setDebtAmount(formatCurrencyInput(e.target.value))}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border font-mono font-bold"
-                    />
-                  </div>
-                </div>
-
                 <div>
                   <label className="block font-semibold mb-1">Tanggal Catat (Back Date)</label>
                   <input
@@ -2797,16 +2972,16 @@ export const FinanceTrackerView: React.FC = () => {
                     className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block font-semibold mb-1">Jatuh Tempo Pembayaran</label>
-                <input
-                  type="date"
-                  value={debtDueDate}
-                  onChange={(e) => setDebtDueDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
-                />
+                <div>
+                  <label className="block font-semibold mb-1">Jatuh Tempo Pembayaran</label>
+                  <input
+                    type="date"
+                    value={debtDueDate}
+                    onChange={(e) => setDebtDueDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
+                  />
+                </div>
               </div>
 
               {/* Attach QR Code Khusus Piutang Ini */}
@@ -2915,125 +3090,207 @@ export const FinanceTrackerView: React.FC = () => {
       {/* ========================================================= */}
       {/* MODAL: PRATINJAU INVOICE WA & GAMBAR QR CODE               */}
       {/* ========================================================= */}
-      {invoiceModalDebt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
-              <div className="flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-emerald-500" />
-                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
-                  Invoice & QR Tagihan WhatsApp
-                </h3>
-              </div>
-              <button onClick={() => setInvoiceModalDebtId(null)} className="text-neutral-400 hover:text-neutral-600">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {invoiceModalDebt && (() => {
+        const invoiceSummary = buildCombinedInvoiceSummary(invoiceModalDebt, combinedInvoiceDebts);
+        const activeQr = invoiceModalDebt.qrImageDataUrl || profile.paymentQrDataUrl;
 
-            <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800 text-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-neutral-900 dark:text-neutral-100">{invoiceModalDebt.debtorName}</span>
-                <span className="font-mono text-[11px] text-indigo-600 dark:text-indigo-400 font-bold">{invoiceModalDebt.invoiceNumber}</span>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
+            <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+                <div className="flex items-center gap-2">
+                  <QrCode className="w-4 h-4 text-emerald-500" />
+                  <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                    Invoice & QR Tagihan WhatsApp
+                  </h3>
+                </div>
+                <button onClick={() => setInvoiceModalDebtId(null)} className="text-neutral-400 hover:text-neutral-600 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <p className="text-neutral-500">{invoiceModalDebt.description}</p>
-              <div className="pt-1.5 border-t border-neutral-200 dark:border-neutral-700 flex items-center justify-between font-mono">
-                <span className="text-neutral-500">Sisa Tagihan:</span>
-                <span className="text-sm font-bold text-rose-600 dark:text-rose-400">
-                  Rp {Math.max(0, invoiceModalDebt.amount - invoiceModalDebt.amountPaid).toLocaleString('id-ID')}
-                </span>
-              </div>
-            </div>
 
-            {/* Active QR Display & Upload Override */}
-            {(() => {
-              const activeQr = invoiceModalDebt.qrImageDataUrl || profile.paymentQrDataUrl;
-              return (
-                <div className="p-4 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-center space-y-3">
-                  {activeQr ? (
-                    <>
-                      <img src={activeQr} alt="QR Pembayaran" className="w-40 h-40 mx-auto object-contain rounded-xl border bg-white p-1" />
-                      <p className="text-[11px] text-neutral-500">
-                        {invoiceModalDebt.qrImageDataUrl
-                          ? 'Menggunakan gambar QR khusus untuk piutang ini.'
-                          : 'Menggunakan QR Code Default dari Pengaturan Profil.'}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="py-4 text-neutral-400 space-y-1">
-                      <QrCode className="w-8 h-8 mx-auto opacity-40" />
-                      <p className="text-xs">Belum ada gambar QR Code terpasang.</p>
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-semibold cursor-pointer hover:bg-neutral-100">
-                      <Upload className="w-3.5 h-3.5 text-indigo-500" />
-                      <span>{invoiceModalDebt.qrImageDataUrl ? 'Ganti Gambar QR' : 'Lampirkan Gambar QR'}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void handleUploadDebtQrImage(f, invoiceModalDebt.id);
-                        }}
-                      />
-                    </label>
-                    {activeQr && (
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadQrImage(activeQr, invoiceModalDebt.invoiceNumber)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5 text-indigo-500" />
-                        <span>Unduh PNG QR</span>
-                      </button>
-                    )}
+              {/* Combine multiple open debts of same debtor */}
+              {debtorSiblingDebts.length > 1 && (
+                <div className="p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50 space-y-2 text-xs">
+                  <p className="font-bold text-indigo-900 dark:text-indigo-200">
+                    Gabungkan Piutang {invoiceModalDebt.debtorName} dalam 1 Invoice ({combinedInvoiceDebts.length}/{debtorSiblingDebts.length}):
+                  </p>
+                  <div className="space-y-1.5">
+                    {debtorSiblingDebts.map((sib) => {
+                      const isChecked = combinedInvoiceDebts.some((c) => c.id === sib.id);
+                      const isPrimary = sib.id === invoiceModalDebt.id;
+                      return (
+                        <label key={sib.id} className="flex items-center justify-between gap-2 cursor-pointer">
+                          <span className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={isPrimary}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setSelectedCombinedDebtIds((prev) =>
+                                  checked
+                                    ? Array.from(new Set([...prev, sib.id]))
+                                    : prev.filter((id) => id !== sib.id || id === invoiceModalDebt.id)
+                                );
+                              }}
+                              className="rounded accent-indigo-600"
+                            />
+                            <span className="truncate text-neutral-700 dark:text-neutral-300">
+                              <span className="font-mono text-[10px] text-indigo-600 dark:text-indigo-400 mr-1">{sib.invoiceNumber}</span>
+                              {sib.description}
+                            </span>
+                          </span>
+                          <span className="font-mono font-semibold text-neutral-800 dark:text-neutral-200 shrink-0">
+                            Rp {Math.max(0, sib.amount - sib.amountPaid).toLocaleString('id-ID')}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
-              );
-            })()}
+              )}
 
-            <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                onClick={() => void handleShareQrWithInvoice(invoiceModalDebt)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer"
-              >
-                <Share2 className="w-4 h-4" />
-                <span>Bagikan Gambar QR + Tagihan (HP / Share)</span>
-              </button>
+              {/* Itemized Breakdown Preview */}
+              <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{invoiceModalDebt.debtorName}</span>
+                  <span className="font-mono text-[10px] text-indigo-600 dark:text-indigo-400 font-bold text-right truncate max-w-[200px]">
+                    {invoiceSummary.invoiceNumbers}
+                  </span>
+                </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleOpenWhatsAppWithInvoice(invoiceModalDebt)}
-                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Buka WhatsApp</span>
-                </button>
+                <div className="space-y-1.5 pt-1 border-t border-neutral-200 dark:border-neutral-700">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+                    Rincian Item Tagihan:
+                  </p>
+                  {invoiceSummary.lineItems.map((item, idx) => (
+                    <div key={`${item.id}-${idx}`} className="flex items-start justify-between gap-3 text-neutral-700 dark:text-neutral-300">
+                      <span className="leading-snug">
+                        {idx + 1}. {item.description}
+                      </span>
+                      <span className="font-mono font-semibold shrink-0">
+                        Rp {item.amount.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const txt = buildInvoiceText(invoiceModalDebt, Boolean(invoiceModalDebt.qrImageDataUrl || profile.paymentQrDataUrl));
-                    navigator.clipboard?.writeText(txt);
-                    showToast('Teks tagihan berhasil disalin!', 'success');
-                  }}
-                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 text-xs font-semibold hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5 text-neutral-500" />
-                  <span>Salin Teks</span>
-                </button>
+                <div className="pt-2 border-t border-neutral-200 dark:border-neutral-700 space-y-1 font-mono">
+                  <div className="flex items-center justify-between text-[11px] text-neutral-500">
+                    <span>Total Tagihan:</span>
+                    <span>Rp {invoiceSummary.totalAmount.toLocaleString('id-ID')}</span>
+                  </div>
+                  {invoiceSummary.totalPaid > 0 && (
+                    <div className="flex items-center justify-between text-[11px] text-emerald-600 dark:text-emerald-400">
+                      <span>Sudah Dibayar:</span>
+                      <span>Rp {invoiceSummary.totalPaid.toLocaleString('id-ID')}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="text-neutral-600 dark:text-neutral-300 font-semibold">Sisa Tagihan:</span>
+                    <span className="text-sm font-bold text-rose-600 dark:text-rose-400">
+                      Rp {invoiceSummary.remaining.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <p className="text-[10px] text-neutral-400 text-center">
-                WhatsApp web/link tidak mengizinkan lampiran gambar otomatis; gunakan <strong>Bagikan Gambar QR</strong> di HP atau lampirkan PNG QR saat chat terbuka.
-              </p>
+
+              {/* Active QR Display & Upload Override */}
+              <div className="p-4 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-center space-y-3">
+                {activeQr ? (
+                  <>
+                    <img src={activeQr} alt="QR Pembayaran" className="w-40 h-40 mx-auto object-contain rounded-xl border bg-white p-1" />
+                    <p className="text-[11px] text-neutral-500">
+                      {invoiceModalDebt.qrImageDataUrl
+                        ? 'Menggunakan gambar QR khusus untuk piutang ini.'
+                        : 'Menggunakan QR Code Default dari Pengaturan Profil.'}
+                    </p>
+                  </>
+                ) : (
+                  <div className="py-4 text-neutral-400 space-y-1">
+                    <QrCode className="w-8 h-8 mx-auto opacity-40" />
+                    <p className="text-xs">Belum ada gambar QR Code terpasang.</p>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-semibold cursor-pointer hover:bg-neutral-100">
+                    <Upload className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{invoiceModalDebt.qrImageDataUrl ? 'Ganti Gambar QR' : 'Lampirkan Gambar QR'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleUploadDebtQrImage(f, invoiceModalDebt.id);
+                      }}
+                    />
+                  </label>
+                  {activeQr && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadQrImage(activeQr, invoiceModalDebt.invoiceNumber)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>Unduh PNG QR</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void handleShareQrWithInvoice(invoiceModalDebt, combinedInvoiceDebts)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>Bagikan Gambar QR + Tagihan (HP / Share)</span>
+                </button>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenWhatsAppWithInvoice(invoiceModalDebt, combinedInvoiceDebts)}
+                    className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>WhatsApp</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadInvoicePDF(invoiceModalDebt, combinedInvoiceDebts)}
+                    className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-xs font-semibold hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>PDF</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const txt = buildInvoiceText(invoiceModalDebt, Boolean(activeQr), combinedInvoiceDebts);
+                      navigator.clipboard?.writeText(txt);
+                      showToast('Teks tagihan berhasil disalin!', 'success');
+                    }}
+                    className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 text-xs font-semibold hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-neutral-500" />
+                    <span>Salin</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-neutral-400 text-center">
+                  WhatsApp web/link tidak mengizinkan lampiran gambar otomatis; gunakan <strong>Bagikan Gambar QR</strong> di HP atau lampirkan PNG QR saat chat terbuka.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================= */}
       {/* MODAL: CATAT BAYAR PIUTANG                                */}

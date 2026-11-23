@@ -39,7 +39,32 @@ function sanitizeOptStr(val: unknown, maxLen: number): string | null {
 
 function sanitizeOptImage(val: unknown): string | null {
   if (typeof val !== 'string') return null;
-  return val.length <= MAX_IMAGE_DATA_URL ? val : null;
+  const trimmed = val.trim();
+  if (!trimmed || trimmed.length > MAX_IMAGE_DATA_URL) return null;
+  if (
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('http://') ||
+    (trimmed.startsWith('/') && !trimmed.startsWith('//')) ||
+    /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return null;
+}
+
+function sanitizeDebtItems(val: unknown): { id: string; description: string; amount: number; date: string }[] | null {
+  if (!Array.isArray(val)) return null;
+  const items = val
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .slice(0, 100)
+    .map((item, idx) => ({
+      id: sanitizeId(item.id, `di-${idx}`),
+      description: sanitizeStr(item.description, 300, 'Rincian Tagihan') || 'Rincian Tagihan',
+      amount: sanitizeNum(item.amount, 0, 0),
+      date: sanitizeDate(item.date),
+    }))
+    .filter((item) => item.amount > 0 || item.description.trim().length > 0);
+  return items.length > 0 ? items : null;
 }
 
 function sanitizeNum(val: unknown, fallback = 0, min = -1e12, max = 1e12): number {
@@ -175,6 +200,8 @@ workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: Auth
               name: profileRows[0].name,
               title: profileRows[0].title,
               avatarUrl: profileRows[0].avatarUrl,
+              appName: profileRows[0].appName || "Q'Hub",
+              appLogoUrl: profileRows[0].appLogoUrl || undefined,
               currencySymbol: profileRows[0].currencySymbol,
               monthlyBudget: Number(profileRows[0].monthlyBudget) || 0,
               bankAccountDetails: profileRows[0].bankAccountDetails || '',
@@ -244,6 +271,7 @@ workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: Auth
           deductFromAccount: d.deductFromAccount ?? undefined,
           disbursementTransactionId: d.disbursementTransactionId || undefined,
           qrImageDataUrl: d.qrImageDataUrl || undefined,
+          items: Array.isArray(d.items) ? d.items : undefined,
           notes: d.notes || undefined,
         })),
         myDebts: myDebtRows.map(md => ({
@@ -381,6 +409,8 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
             name: sanitizeStr(p.name, 120, 'Pengguna QHub') || 'Pengguna QHub',
             title: sanitizeStr(p.title, 160),
             avatarUrl: sanitizeOptImage(p.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg',
+            appName: sanitizeOptStr(p.appName, 80) || "Q'Hub",
+            appLogoUrl: sanitizeOptImage(p.appLogoUrl),
             currencySymbol: sanitizeStr(p.currencySymbol, 10, 'Rp') || 'Rp',
             monthlyBudget: sanitizeNum(p.monthlyBudget, 0, 0),
             bankAccountDetails: sanitizeOptStr(p.bankAccountDetails, 1000),
@@ -393,6 +423,8 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
               name: sanitizeStr(p.name, 120, 'Pengguna QHub') || 'Pengguna QHub',
               title: sanitizeStr(p.title, 160),
               avatarUrl: sanitizeOptImage(p.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg',
+              appName: sanitizeOptStr(p.appName, 80) || "Q'Hub",
+              appLogoUrl: sanitizeOptImage(p.appLogoUrl),
               currencySymbol: sanitizeStr(p.currencySymbol, 10, 'Rp') || 'Rp',
               monthlyBudget: sanitizeNum(p.monthlyBudget, 0, 0),
               bankAccountDetails: sanitizeOptStr(p.bankAccountDetails, 1000),
@@ -514,6 +546,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
           deductFromAccount: typeof d.deductFromAccount === 'boolean' ? d.deductFromAccount : null,
           disbursementTransactionId: sanitizeOptStr(d.disbursementTransactionId, 128),
           qrImageDataUrl: sanitizeOptImage(d.qrImageDataUrl),
+          items: sanitizeDebtItems(d.items),
           notes: sanitizeOptStr(d.notes, 1000),
           updatedAt: new Date(),
         };
@@ -739,6 +772,8 @@ workspaceRouter.put('/workspace/profile', requireAuth, requireDatabase, async (r
       name: p.name !== undefined ? sanitizeStr(p.name, 120, 'Pengguna QHub') : (cur?.name || 'Pengguna QHub'),
       title: p.title !== undefined ? sanitizeStr(p.title, 160) : (cur?.title || ''),
       avatarUrl: p.avatarUrl !== undefined ? (sanitizeOptImage(p.avatarUrl) || cur?.avatarUrl || '/src/assets/images/user_avatar_1793517278515.jpg') : (cur?.avatarUrl || '/src/assets/images/user_avatar_1793517278515.jpg'),
+      appName: p.appName !== undefined ? (sanitizeOptStr(p.appName, 80) || "Q'Hub") : (cur?.appName || "Q'Hub"),
+      appLogoUrl: p.appLogoUrl !== undefined ? sanitizeOptImage(p.appLogoUrl) : (cur?.appLogoUrl ?? null),
       currencySymbol: p.currencySymbol !== undefined ? sanitizeStr(p.currencySymbol, 10, 'Rp') : (cur?.currencySymbol || 'Rp'),
       monthlyBudget: p.monthlyBudget !== undefined ? sanitizeNum(p.monthlyBudget, 0, 0) : (cur?.monthlyBudget ?? 0),
       bankAccountDetails: p.bankAccountDetails !== undefined ? sanitizeOptStr(p.bankAccountDetails, 1000) : (cur?.bankAccountDetails ?? null),
@@ -752,6 +787,8 @@ workspaceRouter.put('/workspace/profile', requireAuth, requireDatabase, async (r
         name: values.name,
         title: values.title,
         avatarUrl: values.avatarUrl,
+        appName: values.appName,
+        appLogoUrl: values.appLogoUrl,
         currencySymbol: values.currencySymbol,
         monthlyBudget: values.monthlyBudget,
         bankAccountDetails: values.bankAccountDetails,
@@ -922,6 +959,7 @@ workspaceRouter.post('/workspace/:collection', requireAuth, requireDatabase, asy
           deductFromAccount: typeof d.deductFromAccount === 'boolean' ? d.deductFromAccount : null,
           disbursementTransactionId: sanitizeOptStr(d.disbursementTransactionId, 128),
           qrImageDataUrl: sanitizeOptImage(d.qrImageDataUrl),
+          items: sanitizeDebtItems(d.items),
           notes: sanitizeOptStr(d.notes, 1000),
           updatedAt: new Date(),
         };
@@ -1189,6 +1227,7 @@ workspaceRouter.patch('/workspace/:collection/:id', requireAuth, requireDatabase
         if (d.description !== undefined) patch.description = sanitizeStr(d.description, 500);
         if (d.status !== undefined && ['unpaid', 'partial', 'paid'].includes(d.status)) patch.status = d.status;
         if (d.qrImageDataUrl !== undefined) patch.qrImageDataUrl = sanitizeOptImage(d.qrImageDataUrl);
+        if (d.items !== undefined) patch.items = sanitizeDebtItems(d.items);
         if (d.notes !== undefined) patch.notes = sanitizeOptStr(d.notes, 1000);
         await db.update(qhubDebts).set(patch).where(and(eq(qhubDebts.userId, uid), eq(qhubDebts.id, id)));
         break;

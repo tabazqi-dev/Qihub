@@ -24,9 +24,10 @@ import { FocusTimerView } from './components/focus/FocusTimerView';
 import { LogbookView } from './components/logbook/LogbookView';
 import { ArchitectureGuideModal } from './components/docs/ArchitectureGuideModal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { LoginScreen } from './components/auth/LoginScreen';
 
 // Icons for Mobile Bottom Nav
-import { LayoutDashboard, CalendarCheck, Wallet, FileText, FileType, QrCode } from 'lucide-react';
+import { LayoutDashboard, CalendarCheck, Wallet, FileText, FileType, Loader2 } from 'lucide-react';
 import { NavigationTab } from './types';
 
 const MainShell: React.FC = () => {
@@ -139,11 +140,45 @@ const MainShell: React.FC = () => {
   );
 };
 
+const AuthGate: React.FC = () => {
+  const { authUser, authLoading, profile } = useApp();
+  const appName = profile.appName?.trim() || "Q'Hub";
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-neutral-100 dark:bg-neutral-950 flex flex-col items-center justify-center gap-3 text-neutral-600 dark:text-neutral-300">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold text-xl shadow-md overflow-hidden">
+          {profile.appLogoUrl ? (
+            <img src={profile.appLogoUrl} alt={appName} className="w-full h-full object-cover" />
+          ) : (
+            <span>Ω</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-xs font-medium">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+          <span>Memeriksa sesi akun {appName}...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <>
+        <LoginScreen />
+        <ToastContainer />
+      </>
+    );
+  }
+
+  return <MainShell />;
+};
+
 export default function App() {
   return (
     <ErrorBoundary>
       <AppProvider>
-        <MainShell />
+        <AuthGate />
       </AppProvider>
     </ErrorBoundary>
   );

@@ -435,26 +435,33 @@ export const ReimburseView: React.FC = () => {
     setPayoutTargetItem(null);
   };
 
-  // Filtered List
+  // Filtered List (urutkan terbaru di paling atas)
   const filteredList = useMemo(() => {
-    return reimbursements.filter(item => {
-      // Search
-      const q = searchQuery.toLowerCase();
-      const matchSearch = !q || 
-        item.property.toLowerCase().includes(q) ||
-        item.description.toLowerCase().includes(q) ||
-        String(item.no).includes(q) ||
-        item.role.toLowerCase().includes(q);
+    return reimbursements
+      .filter(item => {
+        // Search
+        const q = searchQuery.toLowerCase();
+        const matchSearch = !q || 
+          item.property.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q) ||
+          String(item.no).includes(q) ||
+          item.role.toLowerCase().includes(q);
 
-      // Status
-      const matchStatus = selectedStatusFilter === 'all' || item.status.toLowerCase() === selectedStatusFilter.toLowerCase();
-      // Role
-      const matchRole = selectedRoleFilter === 'all' || item.role === selectedRoleFilter;
-      // Type
-      const matchType = selectedTypeFilter === 'all' || item.typeProject === selectedTypeFilter;
+        // Status
+        const matchStatus = selectedStatusFilter === 'all' || item.status.toLowerCase() === selectedStatusFilter.toLowerCase();
+        // Role
+        const matchRole = selectedRoleFilter === 'all' || item.role === selectedRoleFilter;
+        // Type
+        const matchType = selectedTypeFilter === 'all' || item.typeProject === selectedTypeFilter;
 
-      return matchSearch && matchStatus && matchRole && matchType;
-    });
+        return matchSearch && matchStatus && matchRole && matchType;
+      })
+      .sort((a, b) => {
+        const createdCmp = (b.createdAt || '').localeCompare(a.createdAt || '');
+        if (createdCmp !== 0) return createdCmp;
+        if (b.no !== a.no) return b.no - a.no;
+        return b.id.localeCompare(a.id);
+      });
   }, [reimbursements, searchQuery, selectedStatusFilter, selectedRoleFilter, selectedTypeFilter]);
 
   // Aggregate Metrics

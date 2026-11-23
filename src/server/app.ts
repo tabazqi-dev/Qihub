@@ -1,5 +1,6 @@
 import express from 'express';
 import { workspaceRouter } from './workspace.ts';
+import { authRouter } from './authRoutes.ts';
 import { requireAuth } from './auth.ts';
 import { getChartOfAccounts, createJournalEntry, getGeneralLedger, getTrialBalance } from '../db/queries.ts';
 import { isDatabaseConfigured } from '../db/index.ts';
@@ -8,7 +9,8 @@ export const app = express();
 
 app.use(express.json({ limit: '4mb' }));
 
-// Q'Hub PostgreSQL Workspace & Sync API
+// Q'Hub Authentication & PostgreSQL Workspace Sync API
+app.use('/api/auth', authRouter);
 app.use('/api', workspaceRouter);
 
 // Protected Legacy Accounting API routes

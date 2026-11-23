@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import { useApp } from '../../context/AppContext';
 import { compressImageDataUrl } from '../../utils/imageCompress';
+import { sanitizeSafeImageSrc } from '../../utils/debtItems';
 import {
   X,
   Download,
@@ -15,7 +16,8 @@ import {
   RefreshCw,
   QrCode,
   Trash2,
-  CheckCircle2
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -25,10 +27,10 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const {
-    user,
+    authUser,
     syncStatus,
     signInWithGoogle,
-    signOutGoogle,
+    signOutUser,
     pushLocalWorkspaceToCloud,
     profile,
     updateProfile,
@@ -40,22 +42,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [name, setName] = useState(profile.name);
   const [title, setTitle] = useState(profile.title);
+  const [appName, setAppName] = useState(profile.appName || "Q'Hub");
+  const [appLogoUrl, setAppLogoUrl] = useState(profile.appLogoUrl || '');
   const [currencySymbol, setCurrencySymbol] = useState(profile.currencySymbol);
   const [monthlyBudget, setMonthlyBudget] = useState(profile.monthlyBudget.toString());
   const [bankAccountDetails, setBankAccountDetails] = useState(profile.bankAccountDetails || '');
   const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl);
   const [paymentQrDataUrl, setPaymentQrDataUrl] = useState(profile.paymentQrDataUrl || '');
   const [isCompressingAvatar, setIsCompressingAvatar] = useState(false);
+  const [isCompressingLogo, setIsCompressingLogo] = useState(false);
   const [isCompressingQr, setIsCompressingQr] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const qrInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       setName(profile.name);
       setTitle(profile.title);
+      setAppName(profile.appName || "Q'Hub");
+      setAppLogoUrl(profile.appLogoUrl || '');
       setCurrencySymbol(profile.currencySymbol);
       setMonthlyBudget(String(profile.monthlyBudget || 0));
       setBankAccountDetails(profile.bankAccountDetails || '');
@@ -77,6 +85,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateProfile({
       name: name.trim() || profile.name,
       title: title.trim() || profile.title,
+      appName: appName.trim() || "Q'Hub",
+      appLogoUrl: appLogoUrl.trim() || undefined,
       currencySymbol: currencySymbol.trim() || 'Rp',
       monthlyBudget: numericBudget,
       bankAccountDetails: bankAccountDetails.trim(),
@@ -99,6 +109,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       showToast('Gagal memproses foto profil', 'error');
     } finally {
       setIsCompressingAvatar(false);
+    }
+  };
+
+  const handleLogoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setIsCompressingLogo(true);
+    try {
+      const compressed = await compressImageDataUrl(file, 256, 0.9);
+      setAppLogoUrl(compressed);
+      updateProfile({ appLogoUrl: compressed });
+    } catch {
+      showToast('Gagal memproses gambar logo aplikasi', 'error');
+    } finally {
+      setIsCompressingLogo(false);
     }
   };
 
@@ -173,27 +199,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         </div>
 
         <div className="p-6 space-y-6 max-h-[78vh] overflow-y-auto">
-          {/* Cloud Sync Card */}
+          {/* Account & Cloud Sync Card */}
           <div className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/70 dark:bg-indigo-950/30 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                  user ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                  authUser ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
                 }`}>
-                  {user ? <Cloud className="w-5 h-5" /> : <CloudOff className="w-5 h-5" />}
+                  {authUser ? <Cloud className="w-5 h-5" /> : <CloudOff className="w-5 h-5" />}
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
-                    {user ? 'Cloud Sync Antar Device Aktif' : 'Sinkronisasi Antar Device (Cloud Sync)'}
+                    {authUser
+                      ? authUser.authType === 'local'
+                        ? 'Akun Username & Password Aktif'
+                        : 'CloudSync Google Aktif'
+                      : 'Belum Masuk Akun'}
                   </h3>
                   <p className="text-[11px] text-neutral-600 dark:text-neutral-400">
-                    {user
-                      ? `Masuk sebagai ${user.email}`
-                      : 'Masuk dengan akun Google agar data Keuangan, Piutang, Logbook, Reimburse, dan QR tersinkronisasi otomatis di semua HP & Laptop.'}
+                    {authUser
+                      ? authUser.authType === 'local'
+                        ? `Masuk sebagai @${authUser.username} (${authUser.displayName})`
+                        : `Masuk sebagai ${authUser.email}`
+                      : 'Masuk untuk menyinkronkan data ke PostgreSQL.'}
                   </p>
                 </div>
               </div>
-              {user && (
+              {authUser && (
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
                   syncStatus === 'error'
                     ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
@@ -213,7 +245,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               )}
             </div>
 
-            {!user ? (
+            {!authUser ? (
               <button
                 type="button"
                 onClick={signInWithGoogle}
@@ -234,18 +266,96 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </button>
                 <button
                   type="button"
-                  onClick={signOutGoogle}
+                  onClick={() => {
+                    onClose();
+                    void signOutUser();
+                  }}
                   className="py-2 px-3 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-white dark:bg-neutral-900 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Keluar</span>
+                  <span>Keluar Akun</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* Profile Form */}
+          {/* Profile & Branding Form */}
           <form onSubmit={handleSaveProfile} className="space-y-4">
+            {/* App Logo & Name Branding */}
+            <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  Logo & Identitas Aplikasi
+                </span>
+                {appLogoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppLogoUrl('');
+                      updateProfile({ appLogoUrl: undefined });
+                    }}
+                    className="text-[11px] font-semibold text-rose-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" /> Reset Default
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold text-lg shadow-sm overflow-hidden shrink-0">
+                  {sanitizeSafeImageSrc(appLogoUrl) ? (
+                    <img
+                      src={sanitizeSafeImageSrc(appLogoUrl)}
+                      alt={appName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span>Ω</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isCompressingLogo}
+                      onClick={() => logoInputRef.current?.click()}
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {isCompressingLogo ? 'Memproses...' : 'Unggah Logo Baru'}
+                    </button>
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleLogoFileChange}
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={appLogoUrl}
+                    onChange={(e) => setAppLogoUrl(e.target.value)}
+                    placeholder="Atau tempel URL logo (https://...)"
+                    className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                  Nama Aplikasi
+                </label>
+                <input
+                  type="text"
+                  value={appName}
+                  onChange={(e) => setAppName(e.target.value)}
+                  placeholder="Contoh: Q'Hub"
+                  className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100"
+                />
+              </div>
+            </div>
+
             <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
               Profil Pengguna
             </h3>
@@ -253,7 +363,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div className="flex items-center gap-4 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800">
               <img
                 key={avatarUrl}
-                src={avatarUrl || profile.avatarUrl}
+                src={sanitizeSafeImageSrc(avatarUrl) || sanitizeSafeImageSrc(profile.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg'}
                 alt={name}
                 referrerPolicy="no-referrer"
                 onError={(e) => {

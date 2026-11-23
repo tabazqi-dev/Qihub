@@ -153,6 +153,13 @@ export interface FinanceTransaction {
   voidReason?: string;
 }
 
+export interface DebtLineItem {
+  id: string;
+  description: string;
+  amount: number;
+  date: string; // YYYY-MM-DD
+}
+
 // Hutang Orang Lain ke Saya (Piutang / Receivables)
 export interface DebtReceivable {
   id: string;
@@ -171,6 +178,7 @@ export interface DebtReceivable {
   deductFromAccount?: boolean; // Apakah dipotong dari saldo akun saat dicatat
   disbursementTransactionId?: string; // ID transaksi pengeluaran terkait
   qrImageDataUrl?: string; // Gambar QR pembayaran khusus piutang/invoice ini
+  items?: DebtLineItem[]; // Rincian item piutang dengan deskripsi & nominal masing-masing
   notes?: string;
 }
 
@@ -232,10 +240,20 @@ export interface UserProfile {
   name: string;
   title: string;
   avatarUrl: string;
+  appName?: string;
+  appLogoUrl?: string;
   currencySymbol: string;
   monthlyBudget: number;
   bankAccountDetails?: string; // for Invoices
   paymentQrDataUrl?: string; // Default QR Code image for WA & PDF invoices
+}
+
+export interface AuthUser {
+  uid: string;
+  email?: string;
+  displayName: string;
+  username?: string;
+  authType: 'google' | 'local';
 }
 
 export interface HabitItem {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { NavigationTab } from '../../types';
+import { sanitizeSafeImageSrc } from '../../utils/debtItems';
 import { 
   Menu, 
   Sun, 
@@ -33,8 +34,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar,
   onOpenSearch
 }) => {
-  const { activeTab, setActiveTab, theme, toggleTheme } = useApp();
+  const { activeTab, setActiveTab, theme, toggleTheme, profile } = useApp();
   const currentTabInfo = TAB_TITLES[activeTab] || { title: 'Dashboard', subtitle: '' };
+  const appName = profile.appName?.trim() || "Q'Hub";
+  const safeLogo = sanitizeSafeImageSrc(profile.appLogoUrl);
 
   const todayFormatted = new Intl.DateTimeFormat('id-ID', {
     weekday: 'long',
@@ -56,11 +59,18 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <div className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400 min-w-0">
+          {safeLogo && (
+            <img
+              src={safeLogo}
+              alt={appName}
+              className="w-5 h-5 rounded-md object-cover lg:hidden shrink-0"
+            />
+          )}
           <span 
             onClick={() => setActiveTab('dashboard')}
             className="cursor-pointer hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors font-medium hidden sm:inline"
           >
-            Q'Hub
+            {appName}
           </span>
           <span className="hidden sm:inline text-neutral-300 dark:text-neutral-600">/</span>
           <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">

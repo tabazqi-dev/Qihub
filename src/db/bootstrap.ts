@@ -13,11 +13,22 @@ CREATE TABLE IF NOT EXISTS qhub_users (
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS qhub_local_accounts (
+  username TEXT PRIMARY KEY,
+  uid TEXT NOT NULL UNIQUE REFERENCES qhub_users(uid) ON DELETE CASCADE,
+  display_name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS qhub_profiles (
   user_id TEXT PRIMARY KEY REFERENCES qhub_users(uid) ON DELETE CASCADE,
   name TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
   avatar_url TEXT NOT NULL,
+  app_name TEXT,
+  app_logo_url TEXT,
   currency_symbol TEXT NOT NULL DEFAULT 'Rp',
   monthly_budget DOUBLE PRECISION NOT NULL DEFAULT 0,
   bank_account_details TEXT,
@@ -98,6 +109,7 @@ CREATE TABLE IF NOT EXISTS qhub_debts (
   deduct_from_account BOOLEAN,
   disbursement_transaction_id TEXT,
   qr_image_data_url TEXT,
+  items JSONB,
   notes TEXT,
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   PRIMARY KEY (user_id, id)
@@ -237,6 +249,10 @@ CREATE TABLE IF NOT EXISTS qhub_reimburse_rates (
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   PRIMARY KEY (user_id, id)
 );
+
+ALTER TABLE qhub_profiles ADD COLUMN IF NOT EXISTS app_name TEXT;
+ALTER TABLE qhub_profiles ADD COLUMN IF NOT EXISTS app_logo_url TEXT;
+ALTER TABLE qhub_debts ADD COLUMN IF NOT EXISTS items JSONB;
 `;
 
 export async function ensurePostgresSchema(): Promise<void> {

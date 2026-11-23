@@ -61,11 +61,22 @@ export const qhubUsers = pgTable('qhub_users', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const qhubLocalAccounts = pgTable('qhub_local_accounts', {
+  username: text('username').primaryKey(),
+  uid: text('uid').notNull().unique().references(() => qhubUsers.uid, { onDelete: 'cascade' }),
+  displayName: text('display_name').notNull(),
+  passwordHash: text('password_hash').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const qhubProfiles = pgTable('qhub_profiles', {
   userId: text('user_id').primaryKey().references(() => qhubUsers.uid, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   title: text('title').notNull().default(''),
   avatarUrl: text('avatar_url').notNull(),
+  appName: text('app_name'),
+  appLogoUrl: text('app_logo_url'),
   currencySymbol: text('currency_symbol').notNull().default('Rp'),
   monthlyBudget: doublePrecision('monthly_budget').notNull().default(0),
   bankAccountDetails: text('bank_account_details'),
@@ -144,6 +155,7 @@ export const qhubDebts = pgTable('qhub_debts', {
   deductFromAccount: boolean('deduct_from_account'),
   disbursementTransactionId: text('disbursement_transaction_id'),
   qrImageDataUrl: text('qr_image_data_url'),
+  items: jsonb('items').$type<{ id: string; description: string; amount: number; date: string }[]>(),
   notes: text('notes'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => [primaryKey({ columns: [t.userId, t.id] })]);
