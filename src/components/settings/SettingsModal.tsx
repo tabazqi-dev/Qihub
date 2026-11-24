@@ -32,6 +32,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     signInWithGoogle,
     signOutUser,
     pushLocalWorkspaceToCloud,
+    appBranding,
+    updateAppBranding,
     profile,
     updateProfile,
     exportDataJSON,
@@ -42,8 +44,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [name, setName] = useState(profile.name);
   const [title, setTitle] = useState(profile.title);
-  const [appName, setAppName] = useState(profile.appName || "Q'Hub");
-  const [appLogoUrl, setAppLogoUrl] = useState(profile.appLogoUrl || '');
+  const [appName, setAppName] = useState(appBranding.appName || "Q'Hub");
+  const [appLogoUrl, setAppLogoUrl] = useState(appBranding.appLogoUrl || '');
   const [currencySymbol, setCurrencySymbol] = useState(profile.currencySymbol);
   const [monthlyBudget, setMonthlyBudget] = useState(profile.monthlyBudget.toString());
   const [bankAccountDetails, setBankAccountDetails] = useState(profile.bankAccountDetails || '');
@@ -62,15 +64,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     if (isOpen) {
       setName(profile.name);
       setTitle(profile.title);
-      setAppName(profile.appName || "Q'Hub");
-      setAppLogoUrl(profile.appLogoUrl || '');
+      setAppName(appBranding.appName || "Q'Hub");
+      setAppLogoUrl(appBranding.appLogoUrl || '');
       setCurrencySymbol(profile.currencySymbol);
       setMonthlyBudget(String(profile.monthlyBudget || 0));
       setBankAccountDetails(profile.bankAccountDetails || '');
       setAvatarUrl(profile.avatarUrl);
       setPaymentQrDataUrl(profile.paymentQrDataUrl || '');
     }
-  }, [isOpen, profile]);
+  }, [isOpen, profile, appBranding]);
 
   if (!isOpen) return null;
 
@@ -79,14 +81,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     return digits ? parseInt(digits, 10).toLocaleString('id-ID') : '';
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numericBudget = parseInt(monthlyBudget.replace(/\D/g, ''), 10) || 10000000;
+    const numericBudget = parseInt(monthlyBudget.replace(/\D/g, ''), 10) || 0;
+    const nextAppName = appName.trim() || "Q'Hub";
+    const nextLogoUrl = appLogoUrl.trim() || undefined;
+
+    if (nextAppName !== (appBranding.appName || "Q'Hub") || nextLogoUrl !== appBranding.appLogoUrl) {
+      await updateAppBranding({
+        appName: nextAppName,
+        appLogoUrl: nextLogoUrl,
+      });
+    }
+
     updateProfile({
       name: name.trim() || profile.name,
-      title: title.trim() || profile.title,
-      appName: appName.trim() || "Q'Hub",
-      appLogoUrl: appLogoUrl.trim() || undefined,
+      title: title.trim(),
       currencySymbol: currencySymbol.trim() || 'Rp',
       monthlyBudget: numericBudget,
       bankAccountDetails: bankAccountDetails.trim(),
@@ -120,7 +130,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     try {
       const compressed = await compressImageDataUrl(file, 256, 0.9);
       setAppLogoUrl(compressed);
-      updateProfile({ appLogoUrl: compressed });
+      await updateAppBranding({ appLogoUrl: compressed });
     } catch {
       showToast('Gagal memproses gambar logo aplikasi', 'error');
     } finally {
@@ -281,21 +291,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           {/* Profile & Branding Form */}
           <form onSubmit={handleSaveProfile} className="space-y-4">
-            {/* App Logo & Name Branding */}
+            {/* App Logo & Name Branding (Global, decoupled from user account) */}
             <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                  Logo & Identitas Aplikasi
-                </span>
+                <div>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                    Logo & Nama Aplikasi (Global)
+                  </span>
+                  <p className="text-[10px] text-neutral-400 mt-0.5">
+                    Berlaku global untuk seluruh halaman aplikasi & layar login, terpisah dari akun user.
+                  </p>
+                </div>
                 {appLogoUrl && (
                   <button
                     type="button"
                     onClick={() => {
                       setAppLogoUrl('');
-                      updateProfile({ appLogoUrl: undefined });
+                      void updateAppBranding({ appLogoUrl: undefined });
                     }}
-                    className="text-[11px] font-semibold text-rose-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer"
+                    className="text-[11px] font-semibold text-rose-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer shrink-0"
                   >
                     <Trash2 className="w-3 h-3" /> Reset Default
                   </button>
@@ -588,7 +603,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm('Apakah Anda yakin ingin mengembalikan semua data lokal ke template awal?')) {
+                  if (window.confirm('Reset seluruh data akun Anda (rekening, transaksi, piutang, reimburse, logbook, catatan, QR) kembali ke 0? Logo aplikasi global tidak akan berubah.')) {
                     resetAllData();
                     onClose();
                   }
@@ -596,7 +611,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 className="flex items-center gap-2 text-xs text-rose-600 dark:text-rose-400 hover:text-rose-700 p-1 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset ke Data Bawaan (Default Template)</span>
+                <span>Reset Semua Data Akun ke 0 (Kosongkan)</span>
               </button>
             </div>
           </div>

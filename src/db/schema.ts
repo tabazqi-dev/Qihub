@@ -51,6 +51,15 @@ export const journalItemsRelations = relations(journalItems, ({ one }) => ({
   }),
 }));
 
+// ==================== GLOBAL APP SETTINGS (DECOUPLED FROM USER) ====================
+
+export const qhubAppSettings = pgTable('qhub_app_settings', {
+  id: text('id').primaryKey(),
+  appName: text('app_name').notNull().default("Q'Hub"),
+  appLogoUrl: text('app_logo_url'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ==================== Q'HUB FULL POSTGRESQL WORKSPACE TABLES ====================
 
 export const qhubUsers = pgTable('qhub_users', {

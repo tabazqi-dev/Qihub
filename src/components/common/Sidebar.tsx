@@ -45,8 +45,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   onOpenSettings
 }) => {
-  const { activeTab, setActiveTab, todos, debts, reimbursements, profile, authUser, syncStatus, signOutUser } = useApp();
-  const appName = profile.appName?.trim() || "Q'Hub";
+  const { activeTab, setActiveTab, todos, debts, reimbursements, appBranding, profile, authUser, syncStatus, signOutUser } = useApp();
+  const appName = appBranding.appName?.trim() || "Q'Hub";
+  const safeAppLogo = sanitizeSafeImageSrc(appBranding.appLogoUrl);
 
   const pendingTodosCount = todos.filter(t => t.status !== 'completed').length;
   const pendingDebtsCount = debts.filter(d => d.status !== 'paid').length;
@@ -71,6 +72,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onCloseMobile();
   };
 
+  const isDesktopCollapsed = isCollapsed && !isOpenMobile;
+
   return (
     <>
       {/* Mobile Backdrop */}
@@ -86,15 +89,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <aside
         className={`fixed top-0 bottom-0 left-0 z-40 flex flex-col bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 transition-all duration-300 ease-in-out lg:static ${
           isOpenMobile ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
-        } ${isCollapsed ? 'lg:w-18' : 'lg:w-64'}`}
+        } ${isCollapsed ? 'lg:w-20' : 'lg:w-64'}`}
       >
         {/* Brand Header */}
-        <div className="h-16 flex items-center justify-between px-4 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
-          <div className="flex items-center gap-3 overflow-hidden">
+        <div
+          className={`border-b border-neutral-200 dark:border-neutral-800 shrink-0 ${
+            isDesktopCollapsed
+              ? 'flex flex-col items-center justify-center gap-1.5 py-2.5 px-2'
+              : 'h-16 flex items-center justify-between px-4 gap-2'
+          }`}
+        >
+          <div className={`flex items-center ${isDesktopCollapsed ? 'justify-center' : 'gap-3 min-w-0 flex-1'}`}>
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold text-base shadow-sm shrink-0 overflow-hidden">
-              {sanitizeSafeImageSrc(profile.appLogoUrl) ? (
+              {safeAppLogo ? (
                 <img
-                  src={sanitizeSafeImageSrc(profile.appLogoUrl)}
+                  src={safeAppLogo}
                   alt={appName}
                   className="w-full h-full object-cover"
                 />
@@ -102,7 +111,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>Ω</span>
               )}
             </div>
-            {(!isCollapsed || isOpenMobile) && (
+            {!isDesktopCollapsed && (
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-sm tracking-tight text-neutral-900 dark:text-neutral-100 truncate">
@@ -122,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Close on Mobile */}
           <button
             onClick={onCloseMobile}
-            className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 lg:hidden"
+            className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 lg:hidden shrink-0"
             aria-label="Tutup menu sidebar"
           >
             <X className="w-5 h-5" />
@@ -131,7 +140,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Collapse Toggle on Desktop */}
           <button
             onClick={onToggleCollapse}
-            className="hidden lg:flex p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+            className={`hidden lg:flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors shrink-0 cursor-pointer ${
+              isDesktopCollapsed ? 'w-9 h-6' : 'p-1.5'
+            }`}
             title={isCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar'}
           >
             {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}

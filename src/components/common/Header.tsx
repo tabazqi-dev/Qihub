@@ -34,10 +34,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar,
   onOpenSearch
 }) => {
-  const { activeTab, setActiveTab, theme, toggleTheme, profile } = useApp();
+  const { activeTab, setActiveTab, theme, toggleTheme, appBranding } = useApp();
   const currentTabInfo = TAB_TITLES[activeTab] || { title: 'Dashboard', subtitle: '' };
-  const appName = profile.appName?.trim() || "Q'Hub";
-  const safeLogo = sanitizeSafeImageSrc(profile.appLogoUrl);
+  const appName = appBranding.appName?.trim() || "Q'Hub";
+  const safeLogo = sanitizeSafeImageSrc(appBranding.appLogoUrl);
 
   const todayFormatted = new Intl.DateTimeFormat('id-ID', {
     weekday: 'long',

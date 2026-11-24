@@ -99,6 +99,7 @@ export const FinanceTrackerView: React.FC = () => {
     categoryBudgets,
     updateCategoryBudget,
     profile,
+    appBranding,
     showToast
   } = useApp();
 
@@ -249,15 +250,19 @@ export const FinanceTrackerView: React.FC = () => {
     return selected.length > 0 ? selected : [invoiceModalDebt];
   }, [debtorSiblingDebts, selectedCombinedDebtIds, invoiceModalDebt]);
 
-  // Month selector for General Ledger P&L
-  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+  // Month selector for Monthly Budget & General Ledger P&L
+  const currentMonthStr = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  }, []);
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
 
-  // Edit budget modal
+  // Edit / Add category budget modal
   const [editingBudgetCategory, setEditingBudgetCategory] = useState<string | null>(null);
   const [budgetLimitInput, setBudgetLimitInput] = useState('');
+  const [isAddingBudgetCategory, setIsAddingBudgetCategory] = useState(false);
+  const [newBudgetCategoryInput, setNewBudgetCategoryInput] = useState('Food & Dining');
+  const [newBudgetCustomName, setNewBudgetCustomName] = useState('');
 
   // ================= ACCOUNT LEDGER / MUTASI STATE =================
   const [selectedAccountForLedger, setSelectedAccountForLedger] = useState<FinancialAccount | null>(null);
@@ -369,6 +374,44 @@ export const FinanceTrackerView: React.FC = () => {
   monthlyIncome = Math.max(0, monthlyIncome);
   monthlyExpense = Math.max(0, monthlyExpense);
   const monthlyProfitLoss = monthlyIncome - monthlyExpense;
+
+  const formatMonthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    if (!y || !m) return ym;
+    const label = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(y, m - 1, 1));
+    return ym === currentMonthStr ? `${label} (Bulan Ini)` : label;
+  };
+
+  const budgetCategoriesList = useMemo(() => {
+    const set = new Set<string>();
+    categoryBudgets.forEach(b => {
+      if (b.limit > 0 || (monthlyCategoryExpenses[b.category] || 0) > 0) {
+        set.add(b.category);
+      }
+    });
+    Object.keys(monthlyCategoryExpenses).forEach(cat => {
+      if ((monthlyCategoryExpenses[cat] || 0) > 0 && cat !== 'Transfer & Tarik Tunai') {
+        set.add(cat);
+      }
+    });
+    return Array.from(set);
+  }, [categoryBudgets, monthlyCategoryExpenses]);
+
+  const totalConfiguredMonthlyBudget = useMemo(
+    () => categoryBudgets.reduce((sum, b) => sum + (b.limit || 0), 0),
+    [categoryBudgets]
+  );
+
+  const totalBudgetedSpentThisMonth = useMemo(() => {
+    return categoryBudgets.reduce((sum, b) => {
+      if (b.limit > 0) {
+        return sum + (monthlyCategoryExpenses[b.category] || 0);
+      }
+      return sum;
+    }, 0);
+  }, [categoryBudgets, monthlyCategoryExpenses]);
+
+  const totalRemainingMonthlyBudget = totalConfiguredMonthlyBudget - totalBudgetedSpentThisMonth;
 
   // 6. Chart of Accounts & General Journal Calculations
   const allCoaList = useMemo(() => getAllChartOfAccounts(accounts), [accounts]);
@@ -844,7 +887,7 @@ export const FinanceTrackerView: React.FC = () => {
 
       y += 5;
       if (debtItem.debtorPhone) doc.text(`WhatsApp: +${debtItem.debtorPhone}`, margin, y);
-      doc.text(profile.title || (profile.appName || "Q'Hub User"), pageWidth / 2 + 10, y);
+      doc.text(profile.title || (appBranding.appName || "Q'Hub User"), pageWidth / 2 + 10, y);
 
       y += 12;
       doc.setDrawColor(226, 232, 240);
@@ -958,7 +1001,7 @@ export const FinanceTrackerView: React.FC = () => {
       ['Total Pengeluaran', monthlyExpense.toString()],
       ['Surplus / Defisit', monthlyProfitLoss.toString()],
       [],
-      ['Kategori Pengeluaran', 'Realisasi (Rp)', 'Batas Anggaran (Rp)', 'Status']
+      ['Kategori Pengeluaran', 'Realisasi (Rp)', 'Batas Anggaran (Rp)', 'Sisa Budget (Rp)', 'Status']
     ];
     const cats = new Set<string>([
       ...categoryBudgets.map(b => b.category),
@@ -967,8 +1010,9 @@ export const FinanceTrackerView: React.FC = () => {
     cats.forEach(cat => {
       const spent = monthlyCategoryExpenses[cat] || 0;
       const limit = categoryBudgets.find(b => b.category === cat)?.limit || 0;
+      const remaining = limit > 0 ? limit - spent : 0;
       const status = limit > 0 ? (spent > limit ? 'OVERBUDGET' : 'AMAN') : 'TANPA BATAS';
-      rows.push([cat, spent.toString(), limit.toString(), status]);
+      rows.push([cat, spent.toString(), limit.toString(), remaining.toString(), status]);
     });
 
     const csvContent = rows
@@ -1163,6 +1207,178 @@ export const FinanceTrackerView: React.FC = () => {
                 {debts.filter(d => d.status !== 'paid').length} orang · Siap ditagih via WA
               </p>
             </div>
+          </div>
+
+          {/* Monthly Resetting Budget vs Spending Realization Per Category */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                  <SlidersHorizontal className="w-4 h-4 text-indigo-500" />
+                  <span>Realisasi Belanja & Sisa Budget Per Kategori ({formatMonthLabel(selectedMonth)})</span>
+                </h3>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
+                  Realisasi belanja otomatis reset menjadi Rp 0 di awal bulan baru, sementara seluruh transaksi lama tetap tersimpan aman di riwayat.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs font-semibold cursor-pointer"
+                >
+                  {availableMonths.map(m => (
+                    <option key={m} value={m}>{formatMonthLabel(m)}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewBudgetCategoryInput('Food & Dining');
+                    setNewBudgetCustomName('');
+                    setBudgetLimitInput('');
+                    setIsAddingBudgetCategory(true);
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Atur Batas Kategori</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Summary Strip */}
+            {totalConfiguredMonthlyBudget > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800">
+                  <span className="text-[11px] text-neutral-500 block">Total Batas Anggaran / Bln</span>
+                  <span className="text-sm font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">
+                    {profile.currencySymbol} {totalConfiguredMonthlyBudget.toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800">
+                  <span className="text-[11px] text-neutral-500 block">Realisasi Terpakai ({selectedMonth})</span>
+                  <span className="text-sm font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400">
+                    {profile.currencySymbol} {totalBudgetedSpentThisMonth.toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className={`p-3 rounded-xl border ${
+                  totalRemainingMonthlyBudget >= 0
+                    ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50'
+                    : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50'
+                }`}>
+                  <span className="text-[11px] text-neutral-500 block">
+                    {totalRemainingMonthlyBudget >= 0 ? 'Sisa Budget Bulan Ini' : 'Total Overbudget Bulan Ini'}
+                  </span>
+                  <span className={`text-sm font-bold font-mono tabular-nums ${
+                    totalRemainingMonthlyBudget >= 0
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-rose-600 dark:text-rose-400'
+                  }`}>
+                    {totalRemainingMonthlyBudget >= 0 ? '' : '-'}
+                    {profile.currencySymbol} {Math.abs(totalRemainingMonthlyBudget).toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {budgetCategoriesList.length === 0 ? (
+              <div className="py-8 text-center text-neutral-400 space-y-2 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl">
+                <p className="text-xs">
+                  Belum ada batas anggaran atau realisasi pengeluaran pada bulan {formatMonthLabel(selectedMonth)}.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewBudgetCategoryInput('Food & Dining');
+                    setNewBudgetCustomName('');
+                    setBudgetLimitInput('');
+                    setIsAddingBudgetCategory(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-xs font-semibold cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Atur Batas Anggaran Pertama</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {budgetCategoriesList.map(cat => {
+                  const spent = monthlyCategoryExpenses[cat] || 0;
+                  const limit = categoryBudgets.find(b => b.category === cat)?.limit || 0;
+                  const remaining = limit - spent;
+                  const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
+                  const isOver = limit > 0 && spent > limit;
+
+                  return (
+                    <div
+                      key={cat}
+                      className={`p-3.5 rounded-xl border space-y-2 ${
+                        isOver
+                          ? 'border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/20'
+                          : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100 truncate">{cat}</span>
+                          {isOver && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 text-[10px] font-bold">
+                              <AlertTriangle className="w-3 h-3" /> Over
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingBudgetCategory(cat);
+                            setBudgetLimitInput(limit > 0 ? limit.toLocaleString('id-ID') : '');
+                          }}
+                          className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          <Edit2 className="w-3 h-3" /> Edit
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs font-mono tabular-nums">
+                        <span className={isOver ? 'text-rose-600 font-bold' : 'text-neutral-700 dark:text-neutral-300'}>
+                          {profile.currencySymbol} {spent.toLocaleString('id-ID')}
+                        </span>
+                        <span className="text-neutral-400">
+                          / {limit > 0 ? `${profile.currencySymbol} ${limit.toLocaleString('id-ID')}` : 'Tanpa Batas'}
+                        </span>
+                      </div>
+
+                      {limit > 0 ? (
+                        <>
+                          <div className="w-full h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                isOver ? 'bg-rose-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                            <span className={remaining >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-rose-600 dark:text-rose-400 font-bold'}>
+                              {remaining >= 0
+                                ? `Sisa: ${profile.currencySymbol} ${remaining.toLocaleString('id-ID')}`
+                                : `Over: -${profile.currencySymbol} ${Math.abs(remaining).toLocaleString('id-ID')}`}
+                            </span>
+                            <span className="text-neutral-400">{pct}%</span>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-[10px] text-neutral-400">
+                          Klik Edit untuk mengatur batas anggaran bulanan.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Transactions Filter & Table */}
@@ -1569,6 +1785,12 @@ export const FinanceTrackerView: React.FC = () => {
           onEditBudget={(cat, currentLimit) => {
             setEditingBudgetCategory(cat);
             setBudgetLimitInput(currentLimit > 0 ? currentLimit.toLocaleString('id-ID') : '');
+          }}
+          onAddBudget={() => {
+            setNewBudgetCategoryInput('Food & Dining');
+            setNewBudgetCustomName('');
+            setBudgetLimitInput('');
+            setIsAddingBudgetCategory(true);
           }}
           onExportPnlCsv={handleExportPnlCsv}
         />
@@ -2620,7 +2842,7 @@ export const FinanceTrackerView: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: ATUR LIMIT ANGGARAN KATEGORI (GENERAL LEDGER)      */}
+      {/* MODAL: ATUR LIMIT ANGGARAN KATEGORI                       */}
       {/* ========================================================= */}
       {editingBudgetCategory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
@@ -2652,21 +2874,138 @@ export const FinanceTrackerView: React.FC = () => {
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-sm font-mono font-bold"
                   />
                 </div>
+                <p className="text-[11px] text-neutral-400 mt-1">
+                  Berlaku setiap bulan (realisasi otomatis reset di tanggal 1 tiap bulan).
+                </p>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingBudgetCategory(null)}
-                  className="px-3 py-1.5 text-xs rounded-xl border"
+                  className="px-3 py-1.5 text-xs rounded-xl border cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 text-xs rounded-xl bg-indigo-600 text-white font-semibold"
+                  className="px-4 py-1.5 text-xs rounded-xl bg-indigo-600 text-white font-semibold cursor-pointer"
                 >
                   Simpan Limit
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: TAMBAH / PILIH KATEGORI ANGGARAN BULANAN           */}
+      {/* ========================================================= */}
+      {isAddingBudgetCategory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
+          <div className="w-full max-w-sm bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-neutral-200 dark:border-neutral-800">
+              <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                Atur Batas Anggaran Kategori
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddingBudgetCategory(false)}
+                className="text-neutral-400 hover:text-neutral-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const targetCat =
+                  newBudgetCategoryInput === '__custom__'
+                    ? newBudgetCustomName.trim()
+                    : newBudgetCategoryInput;
+                if (!targetCat) return;
+                updateCategoryBudget(targetCat, parseCurrencyInput(budgetLimitInput));
+                setIsAddingBudgetCategory(false);
+              }}
+              className="space-y-3 text-xs"
+            >
+              <div>
+                <label className="block font-semibold text-neutral-500 mb-1">
+                  Pilih Kategori Pengeluaran
+                </label>
+                <select
+                  value={newBudgetCategoryInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewBudgetCategoryInput(val);
+                    const existing = categoryBudgets.find(b => b.category === val)?.limit || 0;
+                    setBudgetLimitInput(existing > 0 ? existing.toLocaleString('id-ID') : '');
+                  }}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border font-semibold"
+                >
+                  <option value="Food & Dining">Food & Dining</option>
+                  <option value="Groceries">Groceries</option>
+                  <option value="Work & Software">Work & Software</option>
+                  <option value="Transport">Transport</option>
+                  <option value="Utilities">Utilities</option>
+                  <option value="Entertainment">Entertainment</option>
+                  <option value="Cicilan & Hutang">Cicilan & Hutang</option>
+                  <option value="__custom__">+ Kategori Lainnya (Ketik Sendiri)</option>
+                </select>
+              </div>
+
+              {newBudgetCategoryInput === '__custom__' && (
+                <div>
+                  <label className="block font-semibold text-neutral-500 mb-1">
+                    Nama Kategori Baru
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newBudgetCustomName}
+                    onChange={(e) => setNewBudgetCustomName(e.target.value)}
+                    placeholder="Misal: Kesehatan, Pendidikan, Olahraga"
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-neutral-500 mb-1">
+                  Batas Anggaran Bulanan (Rp)
+                </label>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-xs font-mono text-neutral-400">Rp</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    value={budgetLimitInput}
+                    onChange={(e) => setBudgetLimitInput(formatCurrencyInput(e.target.value))}
+                    placeholder="1.500.000"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-sm font-mono font-bold"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-400 mt-1">
+                  Realisasi belanja akan ter-reset otomatis tiap bulan baru tanpa menghapus riwayat transaksi.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingBudgetCategory(false)}
+                  className="px-3 py-1.5 text-xs rounded-xl border cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 text-xs rounded-xl bg-indigo-600 text-white font-semibold cursor-pointer"
+                >
+                  Simpan Batas Budget
                 </button>
               </div>
             </form>

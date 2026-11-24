@@ -5,6 +5,13 @@ declare global {
 }
 
 const BOOTSTRAP_SQL = `
+CREATE TABLE IF NOT EXISTS qhub_app_settings (
+  id TEXT PRIMARY KEY,
+  app_name TEXT NOT NULL DEFAULT 'Q''Hub',
+  app_logo_url TEXT,
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS qhub_users (
   uid TEXT PRIMARY KEY,
   email TEXT NOT NULL,

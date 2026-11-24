@@ -439,27 +439,33 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {notes.slice(0, 2).map((note) => (
-                <div
-                  key={note.id}
-                  onClick={() => setActiveTab('notes')}
-                  className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/80 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 transition-all cursor-pointer"
-                >
-                  <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
-                    {note.title}
-                  </p>
-                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 line-clamp-2">
-                    {note.content.replace(/[#*`_]/g, '')}
-                  </p>
-                  <div className="mt-2.5 flex items-center gap-2 text-[10px] text-neutral-400">
-                    <span>{note.category}</span>
-                    <span>·</span>
-                    <span className="font-mono">{note.updatedAt}</span>
+            {notes.length === 0 ? (
+              <div className="py-6 text-center text-xs text-neutral-400">
+                Belum ada catatan. Ketuk "Buka Catatan" untuk mulai menulis.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {notes.slice(0, 2).map((note) => (
+                  <div
+                    key={note.id}
+                    onClick={() => setActiveTab('notes')}
+                    className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/80 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 transition-all cursor-pointer"
+                  >
+                    <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                      {note.title}
+                    </p>
+                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 line-clamp-2">
+                      {note.content.replace(/[#*`_]/g, '')}
+                    </p>
+                    <div className="mt-2.5 flex items-center gap-2 text-[10px] text-neutral-400">
+                      <span>{note.category}</span>
+                      <span>·</span>
+                      <span className="font-mono">{note.updatedAt}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -477,38 +483,44 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
               <span className="text-[11px] font-mono text-neutral-400">Hari ini</span>
             </div>
 
-            <div className="space-y-3">
-              {habits.map((habit) => {
-                const isCompletedToday = habit.completedDays.includes(todayStr);
+            {habits.length === 0 ? (
+              <div className="py-5 text-center text-xs text-neutral-400">
+                Belum ada habit harian yang dibuat.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {habits.map((habit) => {
+                  const isCompletedToday = habit.completedDays.includes(todayStr);
 
-                return (
-                  <div
-                    key={habit.id}
-                    onClick={() => toggleHabitDay(habit.id, todayStr)}
-                    className="flex items-center justify-between p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/80 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 cursor-pointer transition-all"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <p className="text-xs font-medium text-neutral-900 dark:text-neutral-100 truncate">
-                        {habit.title}
-                      </p>
-                      <p className="text-[11px] text-neutral-400 mt-0.5">
-                        {habit.completedDays.length} / {habit.targetPerWeek} kali minggu ini
-                      </p>
-                    </div>
-
-                    <button
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                        isCompletedToday
-                          ? 'bg-emerald-500 text-white shadow-xs'
-                          : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-400'
-                      }`}
+                  return (
+                    <div
+                      key={habit.id}
+                      onClick={() => toggleHabitDay(habit.id, todayStr)}
+                      className="flex items-center justify-between p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/80 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 cursor-pointer transition-all"
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                      <div className="min-w-0 pr-2">
+                        <p className="text-xs font-medium text-neutral-900 dark:text-neutral-100 truncate">
+                          {habit.title}
+                        </p>
+                        <p className="text-[11px] text-neutral-400 mt-0.5">
+                          {habit.completedDays.length} / {habit.targetPerWeek} kali minggu ini
+                        </p>
+                      </div>
+
+                      <button
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                          isCompletedToday
+                            ? 'bg-emerald-500 text-white shadow-xs'
+                            : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-400'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Recent Transactions List */}
@@ -525,35 +537,41 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
               </button>
             </div>
 
-            <div className="space-y-2">
-              {transactions.filter(isTransactionIncludedInLedger).slice(0, 3).map((tx) => {
-                const isIncome = tx.type === 'income';
+            {transactions.filter(isTransactionIncludedInLedger).length === 0 ? (
+              <div className="py-5 text-center text-xs text-neutral-400">
+                Belum ada transaksi tercatat.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {transactions.filter(isTransactionIncludedInLedger).slice(0, 3).map((tx) => {
+                  const isIncome = tx.type === 'income';
 
-                return (
-                  <div
-                    key={tx.id}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/80 dark:border-neutral-800"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
-                        {tx.title}
-                      </p>
-                      <p className="text-[10px] text-neutral-400">
-                        {tx.category} · {tx.date}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`text-xs font-mono font-semibold tabular-nums shrink-0 ${
-                        isIncome ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-                      }`}
+                  return (
+                    <div
+                      key={tx.id}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/80 dark:border-neutral-800"
                     >
-                      {isIncome ? '+' : '-'}{profile.currencySymbol} {tx.amount.toLocaleString('id-ID')}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+                      <div className="min-w-0 pr-2">
+                        <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                          {tx.title}
+                        </p>
+                        <p className="text-[10px] text-neutral-400">
+                          {tx.category} · {tx.date}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`text-xs font-mono font-semibold tabular-nums shrink-0 ${
+                          isIncome ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {isIncome ? '+' : '-'}{profile.currencySymbol} {tx.amount.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Quick Logbook Input Section */}

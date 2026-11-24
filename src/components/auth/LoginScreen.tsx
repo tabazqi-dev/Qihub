@@ -17,7 +17,7 @@ import {
 
 export const LoginScreen: React.FC = () => {
   const {
-    profile,
+    appBranding,
     theme,
     toggleTheme,
     signInWithUsernamePassword,
@@ -34,8 +34,8 @@ export const LoginScreen: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const appName = profile.appName?.trim() || "Q'Hub";
-  const logoSrc = profile.appLogoUrl;
+  const appName = appBranding.appName?.trim() || "Q'Hub";
+  const logoSrc = appBranding.appLogoUrl;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

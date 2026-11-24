@@ -46,6 +46,7 @@ interface ChartOfAccountsViewProps {
   monthlyCategoryExpenses: Record<string, number>;
   categoryBudgets: CategoryBudget[];
   onEditBudget: (category: string, currentLimit: number) => void;
+  onAddBudget?: () => void;
   onExportPnlCsv?: () => void;
 }
 
@@ -64,6 +65,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
   monthlyCategoryExpenses,
   categoryBudgets,
   onEditBudget,
+  onAddBudget,
   onExportPnlCsv
 }) => {
   const [viewMode, setViewMode] = useState<'chart' | 'journal' | 'trial_balance' | 'balance_sheet' | 'pnl'>('chart');
@@ -845,65 +847,98 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
           </div>
 
           <div className="space-y-3">
-            <h5 className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-              Realisasi Belanja vs Batas Anggaran per Kategori
-            </h5>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h5 className="text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  Realisasi Belanja ({selectedMonth}) vs Batas Anggaran per Kategori
+                </h5>
+                <p className="text-[11px] text-neutral-400">
+                  Realisasi otomatis reset ke Rp 0 setiap ganti bulan tanpa menghapus riwayat transaksi.
+                </p>
+              </div>
+              {onAddBudget && (
+                <button
+                  type="button"
+                  onClick={onAddBudget}
+                  className="self-start sm:self-auto px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 cursor-pointer"
+                >
+                  + Atur Batas Kategori
+                </button>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {allPnlCategories.map(cat => {
-                const spent = monthlyCategoryExpenses[cat] || 0;
-                const budgetObj = categoryBudgets.find(b => b.category === cat);
-                const limit = budgetObj?.limit || 0;
-                const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
-                const isOver = limit > 0 && spent > limit;
+              {allPnlCategories.length === 0 ? (
+                <div className="md:col-span-2 py-8 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl">
+                  Belum ada batas anggaran atau pengeluaran pada bulan {selectedMonth}.
+                </div>
+              ) : (
+                allPnlCategories.map(cat => {
+                  const spent = monthlyCategoryExpenses[cat] || 0;
+                  const budgetObj = categoryBudgets.find(b => b.category === cat);
+                  const limit = budgetObj?.limit || 0;
+                  const remaining = limit - spent;
+                  const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
+                  const isOver = limit > 0 && spent > limit;
 
-                return (
-                  <div
-                    key={cat}
-                    className={`p-3.5 rounded-xl border space-y-2 ${
-                      isOver
-                        ? 'border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/20'
-                        : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100 truncate">{cat}</span>
-                        {isOver && (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 text-[10px] font-bold">
-                            <AlertTriangle className="w-3 h-3" /> Overbudget
-                          </span>
-                        )}
+                  return (
+                    <div
+                      key={cat}
+                      className={`p-3.5 rounded-xl border space-y-2 ${
+                        isOver
+                          ? 'border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/20'
+                          : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100 truncate">{cat}</span>
+                          {isOver && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 text-[10px] font-bold">
+                              <AlertTriangle className="w-3 h-3" /> Overbudget
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => onEditBudget(cat, limit)}
+                          className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          <Edit2 className="w-3 h-3" /> Atur Limit
+                        </button>
                       </div>
-                      <button
-                        onClick={() => onEditBudget(cat, limit)}
-                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        <Edit2 className="w-3 h-3" /> Atur Limit
-                      </button>
-                    </div>
 
-                    <div className="flex items-center justify-between text-xs font-mono tabular-nums">
-                      <span className={isOver ? 'text-rose-600 font-bold' : 'text-neutral-700 dark:text-neutral-300'}>
-                        {currencySymbol} {spent.toLocaleString('id-ID')}
-                      </span>
-                      <span className="text-neutral-400">
-                        / {limit > 0 ? `${currencySymbol} ${limit.toLocaleString('id-ID')}` : 'Tanpa Batas'}
-                      </span>
-                    </div>
-
-                    {limit > 0 && (
-                      <div className="w-full h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            isOver ? 'bg-rose-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'
-                          }`}
-                          style={{ width: `${pct}%` }}
-                        />
+                      <div className="flex items-center justify-between text-xs font-mono tabular-nums">
+                        <span className={isOver ? 'text-rose-600 font-bold' : 'text-neutral-700 dark:text-neutral-300'}>
+                          Terpakai: {currencySymbol} {spent.toLocaleString('id-ID')}
+                        </span>
+                        <span className="text-neutral-400">
+                          / {limit > 0 ? `${currencySymbol} ${limit.toLocaleString('id-ID')}` : 'Tanpa Batas'}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+
+                      {limit > 0 && (
+                        <>
+                          <div className="w-full h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                isOver ? 'bg-rose-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                            <span className={remaining >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-rose-600 dark:text-rose-400 font-bold'}>
+                              {remaining >= 0
+                                ? `Sisa Budget: ${currencySymbol} ${remaining.toLocaleString('id-ID')}`
+                                : `Lebih Batas: -${currencySymbol} ${Math.abs(remaining).toLocaleString('id-ID')}`}
+                            </span>
+                            <span className="text-neutral-400">{pct}%</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

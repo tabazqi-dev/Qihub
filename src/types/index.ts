@@ -236,12 +236,15 @@ export interface NoteItem {
   createdAt: string;
 }
 
+export interface AppBranding {
+  appName: string;
+  appLogoUrl?: string;
+}
+
 export interface UserProfile {
   name: string;
   title: string;
   avatarUrl: string;
-  appName?: string;
-  appLogoUrl?: string;
   currencySymbol: string;
   monthlyBudget: number;
   bankAccountDetails?: string; // for Invoices

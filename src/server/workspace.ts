@@ -4,6 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDb, isDatabaseConfigured } from '../db/index.ts';
 import { ensurePostgresSchema } from '../db/bootstrap.ts';
 import {
+  qhubAppSettings,
   qhubUsers,
   qhubProfiles,
   qhubPreferences,
@@ -145,6 +146,121 @@ workspaceRouter.get('/health', (_req, res) => {
   });
 });
 
+// Public global app branding (decoupled from individual user accounts)
+workspaceRouter.get('/branding', async (_req, res) => {
+  if (!isDatabaseConfigured()) {
+    return res.json({ appName: "Q'Hub", appLogoUrl: null });
+  }
+  try {
+    await ensurePostgresSchema();
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(qhubAppSettings)
+      .where(eq(qhubAppSettings.id, 'global'));
+
+    if (rows[0]) {
+      return res.json({
+        appName: rows[0].appName || "Q'Hub",
+        appLogoUrl: rows[0].appLogoUrl || null,
+      });
+    }
+
+    // One-time seamless migration if branding was previously stored in legacy profile row
+    const legacyProfiles = await db
+      .select({
+        appName: qhubProfiles.appName,
+        appLogoUrl: qhubProfiles.appLogoUrl,
+      })
+      .from(qhubProfiles)
+      .orderBy(desc(qhubProfiles.updatedAt))
+      .limit(10);
+
+    const legacyWithBranding = legacyProfiles.find(
+      (p) => Boolean(p.appLogoUrl) || (p.appName && p.appName.trim() !== "Q'Hub")
+    );
+    const initialName = sanitizeOptStr(legacyWithBranding?.appName, 80) || "Q'Hub";
+    const initialLogo = sanitizeOptImage(legacyWithBranding?.appLogoUrl);
+
+    await db
+      .insert(qhubAppSettings)
+      .values({
+        id: 'global',
+        appName: initialName,
+        appLogoUrl: initialLogo,
+        updatedAt: new Date(),
+      })
+      .onConflictDoNothing();
+
+    return res.json({
+      appName: initialName,
+      appLogoUrl: initialLogo,
+    });
+  } catch (err) {
+    console.error('Failed to load global branding:', err instanceof Error ? err.message : err);
+    return res.json({ appName: "Q'Hub", appLogoUrl: null });
+  }
+});
+
+// Update global app branding (authenticated users, global singleton independent of user profile)
+workspaceRouter.put('/branding', requireAuth, requireDatabase, async (req: AuthRequest, res) => {
+  const b = req.body || {};
+  try {
+    const db = getDb();
+    const existing = await db
+      .select()
+      .from(qhubAppSettings)
+      .where(eq(qhubAppSettings.id, 'global'));
+    const cur = existing[0];
+
+    const appName =
+      b.appName !== undefined
+        ? (sanitizeOptStr(b.appName, 80) || "Q'Hub")
+        : (cur?.appName || "Q'Hub");
+
+    let appLogoUrl: string | null = cur?.appLogoUrl ?? null;
+    if ('appLogoUrl' in b) {
+      if (!b.appLogoUrl) {
+        appLogoUrl = null;
+      } else {
+        const sanitized = sanitizeOptImage(b.appLogoUrl);
+        if (!sanitized) {
+          return res.status(400).json({ error: 'Format atau ukuran gambar logo tidak valid.' });
+        }
+        appLogoUrl = sanitized;
+      }
+    }
+
+    await db
+      .insert(qhubAppSettings)
+      .values({
+        id: 'global',
+        appName,
+        appLogoUrl,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: qhubAppSettings.id,
+        set: {
+          appName,
+          appLogoUrl,
+          updatedAt: new Date(),
+        },
+      });
+
+    return res.json({
+      success: true,
+      branding: {
+        appName,
+        appLogoUrl,
+      },
+    });
+  } catch (err) {
+    console.error('Failed to update global branding:', err instanceof Error ? err.message : err);
+    return res.status(500).json({ error: 'Gagal memperbarui logo aplikasi global' });
+  }
+});
+
 // Load entire workspace for authenticated user
 workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: AuthRequest, res) => {
   const uid = req.user!.uid;
@@ -200,8 +316,6 @@ workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: Auth
               name: profileRows[0].name,
               title: profileRows[0].title,
               avatarUrl: profileRows[0].avatarUrl,
-              appName: profileRows[0].appName || "Q'Hub",
-              appLogoUrl: profileRows[0].appLogoUrl || undefined,
               currencySymbol: profileRows[0].currencySymbol,
               monthlyBudget: Number(profileRows[0].monthlyBudget) || 0,
               bankAccountDetails: profileRows[0].bankAccountDetails || '',
@@ -409,8 +523,6 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
             name: sanitizeStr(p.name, 120, 'Pengguna QHub') || 'Pengguna QHub',
             title: sanitizeStr(p.title, 160),
             avatarUrl: sanitizeOptImage(p.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg',
-            appName: sanitizeOptStr(p.appName, 80) || "Q'Hub",
-            appLogoUrl: sanitizeOptImage(p.appLogoUrl),
             currencySymbol: sanitizeStr(p.currencySymbol, 10, 'Rp') || 'Rp',
             monthlyBudget: sanitizeNum(p.monthlyBudget, 0, 0),
             bankAccountDetails: sanitizeOptStr(p.bankAccountDetails, 1000),
@@ -423,8 +535,6 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
               name: sanitizeStr(p.name, 120, 'Pengguna QHub') || 'Pengguna QHub',
               title: sanitizeStr(p.title, 160),
               avatarUrl: sanitizeOptImage(p.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg',
-              appName: sanitizeOptStr(p.appName, 80) || "Q'Hub",
-              appLogoUrl: sanitizeOptImage(p.appLogoUrl),
               currencySymbol: sanitizeStr(p.currencySymbol, 10, 'Rp') || 'Rp',
               monthlyBudget: sanitizeNum(p.monthlyBudget, 0, 0),
               bankAccountDetails: sanitizeOptStr(p.bankAccountDetails, 1000),
@@ -772,8 +882,6 @@ workspaceRouter.put('/workspace/profile', requireAuth, requireDatabase, async (r
       name: p.name !== undefined ? sanitizeStr(p.name, 120, 'Pengguna QHub') : (cur?.name || 'Pengguna QHub'),
       title: p.title !== undefined ? sanitizeStr(p.title, 160) : (cur?.title || ''),
       avatarUrl: p.avatarUrl !== undefined ? (sanitizeOptImage(p.avatarUrl) || cur?.avatarUrl || '/src/assets/images/user_avatar_1793517278515.jpg') : (cur?.avatarUrl || '/src/assets/images/user_avatar_1793517278515.jpg'),
-      appName: p.appName !== undefined ? (sanitizeOptStr(p.appName, 80) || "Q'Hub") : (cur?.appName || "Q'Hub"),
-      appLogoUrl: p.appLogoUrl !== undefined ? sanitizeOptImage(p.appLogoUrl) : (cur?.appLogoUrl ?? null),
       currencySymbol: p.currencySymbol !== undefined ? sanitizeStr(p.currencySymbol, 10, 'Rp') : (cur?.currencySymbol || 'Rp'),
       monthlyBudget: p.monthlyBudget !== undefined ? sanitizeNum(p.monthlyBudget, 0, 0) : (cur?.monthlyBudget ?? 0),
       bankAccountDetails: p.bankAccountDetails !== undefined ? sanitizeOptStr(p.bankAccountDetails, 1000) : (cur?.bankAccountDetails ?? null),
@@ -787,8 +895,6 @@ workspaceRouter.put('/workspace/profile', requireAuth, requireDatabase, async (r
         name: values.name,
         title: values.title,
         avatarUrl: values.avatarUrl,
-        appName: values.appName,
-        appLogoUrl: values.appLogoUrl,
         currencySymbol: values.currencySymbol,
         monthlyBudget: values.monthlyBudget,
         bankAccountDetails: values.bankAccountDetails,

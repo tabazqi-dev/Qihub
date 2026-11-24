@@ -18,6 +18,7 @@ import {
   CategoryBudget,
   NoteItem,
   UserProfile,
+  AppBranding,
   AuthUser,
   HabitItem,
   FinancialAccount,
@@ -60,6 +61,8 @@ interface AppContextType {
   setActiveTab: (tab: NavigationTab) => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+  appBranding: AppBranding;
+  updateAppBranding: (updates: Partial<AppBranding>) => Promise<void>;
   profile: UserProfile;
   updateProfile: (profile: Partial<UserProfile>) => void;
 
@@ -166,342 +169,19 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const SEED_PROFILE: UserProfile = {
-  name: 'Alif Pratama',
-  title: 'Lead Product Engineer & Creative Tech',
-  avatarUrl: '/src/assets/images/user_avatar_1793517278515.jpg',
-  appName: "Q'Hub",
-  appLogoUrl: undefined,
+const DEFAULT_AVATAR_URL = '/src/assets/images/user_avatar_1793517278515.jpg';
+
+const DEFAULT_PROFILE: UserProfile = {
+  name: 'Pengguna Baru',
+  title: '',
+  avatarUrl: DEFAULT_AVATAR_URL,
   currencySymbol: 'Rp',
-  monthlyBudget: 15000000,
-  bankAccountDetails: 'BCA: 873-049-2189 a/n Alif Pratama\nMandiri: 137-00-1982736-1\nGoPay/OVO: 0812-8899-7721'
+  monthlyBudget: 0,
+  bankAccountDetails: '',
+  paymentQrDataUrl: undefined,
 };
 
-const SEED_TODOS: TodoItem[] = [
-  {
-    id: 'td-1',
-    title: 'Review System Design & API Contract Q4',
-    description: 'Pastikan endpoint modularitas super-app dan integrasi client-side library sesuai spesifikasi.',
-    dueDate: '2026-11-01',
-    dueTime: '14:00',
-    priority: 'high',
-    status: 'in_progress',
-    category: 'Work',
-    tags: ['Architecture', 'Tech Lead'],
-    subtasks: [
-      { id: 'st-1', text: 'Periksa dokumentasi types', completed: true },
-      { id: 'st-2', text: 'Validasi kompatibilitas PDF Lib & QR', completed: true },
-      { id: 'st-3', text: 'Review performa Lighthouse', completed: false }
-    ]
-  },
-  {
-    id: 'td-2',
-    title: 'Generate QR & Barcode inventaris lab',
-    description: 'Cetak barcode Code128 dan QR code untuk 25 hardware periferal baru.',
-    dueDate: '2026-11-02',
-    priority: 'medium',
-    status: 'pending',
-    category: 'Operations',
-    tags: ['Barcode', 'Inventory']
-  },
-  {
-    id: 'td-3',
-    title: 'Kirim Invoice Penagihan Desain UI ke Budi Santoso',
-    description: 'Follow up piutang proyek freelance bulan Oktober via WhatsApp.',
-    dueDate: '2026-11-01',
-    dueTime: '15:30',
-    priority: 'high',
-    status: 'pending',
-    category: 'Finance',
-    tags: ['Invoice', 'Piutang']
-  }
-];
-
-const SEED_TRANSACTIONS: FinanceTransaction[] = [
-  {
-    id: 'tx-1',
-    type: 'income',
-    title: 'Gaji Bulanan Software Engineering',
-    amount: 28500000,
-    category: 'Salary',
-    date: '2026-11-01',
-    paymentMethod: 'Bank Transfer',
-    walletType: 'non_cash',
-    accountName: 'BCA Utama',
-    accountId: 'acc-bca',
-    notes: 'Transfer otomatis payroll.'
-  },
-  {
-    id: 'tx-2',
-    type: 'expense',
-    title: 'Langganan Cloud Server & Database',
-    amount: 1450000,
-    category: 'Work & Software',
-    date: '2026-11-01',
-    paymentMethod: 'Credit Card',
-    walletType: 'non_cash',
-    accountName: 'Mandiri Payroll',
-    accountId: 'acc-mandiri',
-    notes: 'Google Cloud & Vercel'
-  },
-  {
-    id: 'tx-3',
-    type: 'expense',
-    title: 'Tarik Tunai ATM untuk Kas Harian',
-    amount: 1500000,
-    category: 'Cash Withdrawal',
-    date: '2026-10-31',
-    paymentMethod: 'Cash',
-    walletType: 'cash',
-    accountName: 'Dompet Tunai Fisik',
-    accountId: 'acc-cash',
-    notes: 'Tarik tunai ATM BCA'
-  },
-  {
-    id: 'tx-4',
-    type: 'expense',
-    title: 'Belanja Sayur & Buah di Pasar Tradisional',
-    amount: 350000,
-    category: 'Groceries',
-    date: '2026-10-31',
-    paymentMethod: 'Cash',
-    walletType: 'cash',
-    accountName: 'Dompet Tunai Fisik',
-    accountId: 'acc-cash',
-    notes: 'Pembayaran uang tunai'
-  },
-  {
-    id: 'tx-5',
-    type: 'expense',
-    title: 'Makan Malam Resto & Coffee Meetup',
-    amount: 680000,
-    category: 'Food & Dining',
-    date: '2026-10-30',
-    paymentMethod: 'E-Wallet',
-    walletType: 'non_cash',
-    accountName: 'GoPay',
-    accountId: 'acc-gopay',
-    notes: 'Dinner dengan klien'
-  },
-  {
-    id: 'tx-6',
-    type: 'expense',
-    title: 'Bensin & Tol Mobil Operasional',
-    amount: 450000,
-    category: 'Transport',
-    date: '2026-10-29',
-    paymentMethod: 'Cash',
-    walletType: 'cash',
-    accountName: 'Dompet Tunai Fisik',
-    accountId: 'acc-cash',
-    notes: 'Uang bensin cash'
-  },
-  {
-    id: 'tx-7',
-    type: 'income',
-    title: 'Pembayaran DP Proyek Landing Page SaaS',
-    amount: 5000000,
-    category: 'Freelance',
-    date: '2026-10-28',
-    paymentMethod: 'Bank Transfer',
-    walletType: 'non_cash',
-    accountName: 'BCA Utama',
-    accountId: 'acc-bca',
-    notes: 'DP 50% dari klien'
-  },
-  {
-    id: 'tx-8',
-    type: 'expense',
-    title: 'Supermarket Belanja Bulanan',
-    amount: 2200000,
-    category: 'Groceries',
-    date: '2026-10-27',
-    paymentMethod: 'E-Wallet',
-    walletType: 'non_cash',
-    accountName: 'OVO',
-    accountId: 'acc-ovo',
-    notes: 'Groceries bulanan'
-  }
-];
-
-const SEED_DEBTS: DebtReceivable[] = [
-  {
-    id: 'dbt-1',
-    debtorName: 'Budi Santoso (Studio Visual)',
-    debtorPhone: '6281234567890',
-    debtorEmail: 'budi.santoso@studiovisual.id',
-    amount: 4500000,
-    amountPaid: 1500000,
-    dueDate: '2026-11-05',
-    issuedDate: '2026-10-15',
-    description: 'Pelunasan Desain Sistem UI/UX & Redesain Dashboard Web',
-    status: 'partial',
-    invoiceNumber: 'INV-2026-001',
-    notes: 'Sudah DP 1.5jt, sisa 3jt dibayarkan sebelum tanggal 5 Nov.'
-  },
-  {
-    id: 'dbt-2',
-    debtorName: 'Rian Hidayat',
-    debtorPhone: '6285711223344',
-    debtorEmail: 'rian.hidayat@gmail.com',
-    amount: 1200000,
-    amountPaid: 0,
-    dueDate: '2026-11-03',
-    issuedDate: '2026-10-20',
-    description: 'Pinjaman Talangan Pembelian Hardware Monitor Dell',
-    status: 'unpaid',
-    invoiceNumber: 'INV-2026-002',
-    notes: 'Janji bayar awal bulan saat gajian.'
-  },
-  {
-    id: 'dbt-3',
-    debtorName: 'Siti Rahma (CV Maju Digital)',
-    debtorPhone: '6281988776655',
-    debtorEmail: 'siti@majudigital.co.id',
-    amount: 3000000,
-    amountPaid: 3000000,
-    dueDate: '2026-10-28',
-    issuedDate: '2026-10-10',
-    description: 'Konsultasi Optimasi Performa Web & SEO',
-    status: 'paid',
-    invoiceNumber: 'INV-2026-003',
-    notes: 'Sudah lunas ditransfer ke rekening BCA.'
-  }
-];
-
-const SEED_CATEGORY_BUDGETS: CategoryBudget[] = [
-  { category: 'Food & Dining', limit: 2500000 },
-  { category: 'Groceries', limit: 2000000 },
-  { category: 'Work & Software', limit: 1200000 },
-  { category: 'Transport', limit: 800000 },
-  { category: 'Utilities', limit: 1000000 },
-  { category: 'Entertainment', limit: 1000000 },
-];
-
-const SEED_NOTES: NoteItem[] = [
-  {
-    id: 'nt-1',
-    title: "Panduan Arsitektur Modular Q'Hub",
-    category: 'Architecture',
-    tags: ['Framework', 'Guide', 'Scalability'],
-    isPinned: true,
-    createdAt: '2026-10-25',
-    updatedAt: '2026-11-01',
-    content: `# Arsitektur Super App Q'Hub
-
-Q'Hub dirancang dengan prinsip **Domain-Driven Modular Architecture**:
-- Pemisahan dompet Tunai (Cash) dan Non-Tunai (Rekening/E-Wallet)
-- Manajemen Piutang & Generator Invoice Resmi siap kirim WhatsApp + QR Code
-- Engine Remove BG client-side cepat tanpa kirim data ke luar
-- General Ledger, Neraca (Balance Sheet), & Laporan Bulanan Laba-Rugi (P&L)
-`
-  }
-];
-
-const SEED_HABITS: HabitItem[] = [
-  { id: 'hb-1', title: 'Deep Work 2 Sesi (90 Menit)', targetPerWeek: 5, completedDays: ['2026-10-28', '2026-10-29', '2026-10-31', '2026-11-01'], color: 'indigo' },
-  { id: 'hb-2', title: 'Minum Air Mineral 2.5 Liter', targetPerWeek: 7, completedDays: ['2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01'], color: 'cyan' },
-];
-
-const SEED_ACCOUNTS: FinancialAccount[] = [
-  {
-    id: 'acc-bca',
-    name: 'BCA Utama',
-    type: 'bank',
-    initialBalance: 18500000,
-    accountNumber: '8830129841',
-    color: '#2563eb',
-    notes: 'Rekening tabungan utama & payroll'
-  },
-  {
-    id: 'acc-mandiri',
-    name: 'Mandiri Payroll',
-    type: 'bank',
-    initialBalance: 7200000,
-    accountNumber: '1370019283741',
-    color: '#0891b2',
-    notes: 'Rekening operasional & kartu kredit'
-  },
-  {
-    id: 'acc-gopay',
-    name: 'GoPay',
-    type: 'ewallet',
-    initialBalance: 850000,
-    accountNumber: '081234567890',
-    color: '#059669',
-    notes: 'E-Wallet harian & GoFood'
-  },
-  {
-    id: 'acc-dana',
-    name: 'DANA',
-    type: 'ewallet',
-    initialBalance: 600000,
-    accountNumber: '081234567890',
-    color: '#0284c7',
-    notes: 'E-Wallet tagihan & belanja'
-  },
-  {
-    id: 'acc-ovo',
-    name: 'OVO',
-    type: 'ewallet',
-    initialBalance: 450000,
-    accountNumber: '081234567890',
-    color: '#7c3aed',
-    notes: 'E-Wallet transportasi'
-  },
-  {
-    id: 'acc-cash',
-    name: 'Dompet Tunai Fisik',
-    type: 'cash',
-    initialBalance: 750000,
-    color: '#d97706',
-    notes: 'Uang fisik di dompet & kas kecil'
-  }
-];
-
-const SEED_MY_DEBTS: MyDebtLiability[] = [
-  {
-    id: 'mdeb-1',
-    creditorName: 'GoPay Later',
-    description: 'Pembelian Meja Kerja Ergonomis & Monitor Stand',
-    amount: 3600000,
-    amountPaid: 1200000,
-    dueDate: '2026-11-15',
-    issuedDate: '2026-10-15',
-    status: 'partial',
-    sourceAccountId: 'acc-gopay',
-    category: 'Work & Software',
-    notes: 'Cicilan 3 bulan, sisa 2 bulan.'
-  },
-  {
-    id: 'mdeb-2',
-    creditorName: 'Bank BCA (Kartu Kredit)',
-    description: 'Tiket Pesawat & Akomodasi Konferensi Tech',
-    amount: 4200000,
-    amountPaid: 0,
-    dueDate: '2026-11-20',
-    issuedDate: '2026-10-25',
-    status: 'unpaid',
-    sourceAccountId: 'acc-bca',
-    category: 'Work & Software',
-    notes: 'Jatuh tempo 20 November.'
-  },
-  {
-    id: 'mdeb-3',
-    creditorName: 'Hendra Wijaya (Rekan Kerja)',
-    description: 'Talangan Service Mobil Dinas',
-    amount: 800000,
-    amountPaid: 800000,
-    dueDate: '2026-10-30',
-    issuedDate: '2026-10-10',
-    status: 'paid',
-    sourceAccountId: 'acc-bca',
-    category: 'Operations',
-    notes: 'Sudah lunas ditransfer kembali.'
-  }
-];
-
-const SEED_NOTE_CATEGORIES = ['Umum', 'Ide & Konsep', 'Materi & Riset', 'Work', 'Meeting', 'Arsitektur'];
+const DEFAULT_NOTE_CATEGORIES = ['Umum', 'Ide & Konsep', 'Materi & Riset', 'Work', 'Meeting'];
 
 export const DEFAULT_REIMBURSE_RATES: ReimburseRate[] = [
   { id: 'rate-1', role: 'M', type: 'Onsite', wdRate: 44500, weRate: 69500 },
@@ -512,96 +192,33 @@ export const DEFAULT_REIMBURSE_RATES: ReimburseRate[] = [
   { id: 'rate-6', role: 'PM', type: 'Online', wdRate: 60000, weRate: 78750 },
 ];
 
-export const SEED_REIMBURSEMENTS: ReimbursementItem[] = [
-  {
-    id: 'rmb-1',
-    no: 1,
-    submissionDate: '2026-08-12',
-    property: 'Swiss-Belinn-Yogyakarta',
-    typeProject: 'Onsite',
-    role: 'M',
-    startDate: '2026-09-26',
-    endDate: '2026-09-25',
-    wdDays: 22,
-    weDays: 2,
-    totalDays: 24,
-    description: 'Swiss-Belinn-Yogyakarta, Onsite, WD=22, WE=2, Project: 26/09/2026 - 25/09/2026',
-    wdRate: 44500,
-    weRate: 69500,
-    wdAmount: 979000,
-    weAmount: 139000,
-    totalAmount: 1118000,
-    status: 'Done',
-    deliveryDate: '11/4/2026 21:36:49',
-    createdAt: '2026-08-12T08:00:00.000Z'
-  },
-  {
-    id: 'rmb-2',
-    no: 2,
-    submissionDate: '2026-08-12',
-    property: 'Metland Marron Tomohon',
-    typeProject: 'Onsite',
-    role: 'M',
-    startDate: '2026-09-01',
-    endDate: '2026-09-17',
-    wdDays: 19,
-    weDays: 4,
-    totalDays: 23,
-    description: 'Metland Marron Tomohon, Onsite, WD=19, WE=4, Project: 01/09/2026 - 17/09/2026',
-    wdRate: 44500,
-    weRate: 69500,
-    wdAmount: 845500,
-    weAmount: 278000,
-    totalAmount: 1123500,
-    status: 'Done',
-    deliveryDate: '11/4/2026 21:36:49',
-    createdAt: '2026-08-12T09:30:00.000Z'
-  },
-  {
-    id: 'rmb-3',
-    no: 3,
-    submissionDate: '2026-08-14',
-    property: 'Metland Marron Tomohon',
-    typeProject: 'Online',
-    role: 'M',
-    startDate: '2026-09-29',
-    endDate: '2026-09-30',
-    wdDays: 4,
-    weDays: 0,
-    totalDays: 2,
-    description: 'Metland Marron Tomohon, Online, WD=4, WE=0, Project: 29/09/2026 - 30/09/2026',
-    wdRate: 18750,
-    weRate: 37500,
-    wdAmount: 75000,
-    weAmount: 0,
-    totalAmount: 75000,
-    status: 'Done',
-    deliveryDate: '11/4/2026 21:36:49',
-    createdAt: '2026-08-14T10:15:00.000Z'
-  },
-  {
-    id: 'rmb-4',
-    no: 4,
-    submissionDate: '2026-08-15',
-    property: 'Adhisthana Hotel Yogyakarta',
-    typeProject: 'Onsite',
-    role: 'M',
-    startDate: '2026-10-01',
-    endDate: '2026-10-19',
-    wdDays: 13,
-    weDays: 3,
-    totalDays: 16,
-    description: 'Adhisthana Hotel Yogyakarta, Onsite, WD=13, WE=3, Project: 01/10/2026 - 19/10/2026',
-    wdRate: 44500,
-    weRate: 69500,
-    wdAmount: 578500,
-    weAmount: 208500,
-    totalAmount: 787000,
-    status: 'Submitted',
-    deliveryDate: '11/4/2026 21:36:49',
-    createdAt: '2026-08-15T14:20:00.000Z'
-  }
+const USER_STORAGE_KEYS = [
+  'omnihub_profile',
+  'omnihub_accounts',
+  'omnihub_todos',
+  'omnihub_transactions',
+  'omnihub_debts',
+  'omnihub_my_debts',
+  'omnihub_daily_audits',
+  'omnihub_budgets',
+  'omnihub_notes',
+  'omnihub_note_categories',
+  'omnihub_habits',
+  'omnihub_logbook_entries',
+  'omnihub_saved_barcodes',
+  'omnihub_reimbursements',
+  'omnihub_reimburse_rates',
 ];
+
+function clearUserWorkspaceStorage() {
+  USER_STORAGE_KEYS.forEach((k) => {
+    try {
+      localStorage.removeItem(k);
+    } catch {
+      // ignore storage errors
+    }
+  });
+}
 
 class ApiRequestError extends Error {
   status: number;
@@ -623,17 +240,27 @@ function sanitizeImageDataUrl(val: string | undefined, maxLen = 245000): string 
   return val.length <= maxLen ? val : undefined;
 }
 
-function readStoredBranding(): { appName?: string; appLogoUrl?: string } {
+function readStoredBranding(): AppBranding {
   try {
     const raw = localStorage.getItem('omnihub_branding');
-    if (!raw) return {};
+    if (!raw) return { appName: "Q'Hub", appLogoUrl: undefined };
     const parsed = JSON.parse(raw);
     return {
-      appName: typeof parsed?.appName === 'string' && parsed.appName.trim() ? parsed.appName.trim() : undefined,
+      appName: typeof parsed?.appName === 'string' && parsed.appName.trim() ? parsed.appName.trim() : "Q'Hub",
       appLogoUrl: sanitizeSafeImageSrc(parsed?.appLogoUrl),
     };
   } catch {
-    return {};
+    return { appName: "Q'Hub", appLogoUrl: undefined };
+  }
+}
+
+function readJsonStorage<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
   }
 }
 
@@ -655,132 +282,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'dark';
   });
 
+  // Global app branding (independent from user accounts)
+  const [appBranding, setAppBranding] = useState<AppBranding>(() => readStoredBranding());
+
   const [profile, setProfile] = useState<UserProfile>(() => {
-    const branding = readStoredBranding();
     const saved = localStorage.getItem('omnihub_profile');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         return {
-          ...SEED_PROFILE,
+          ...DEFAULT_PROFILE,
           ...parsed,
-          appName: parsed.appName || branding.appName || SEED_PROFILE.appName,
-          appLogoUrl: sanitizeSafeImageSrc(parsed.appLogoUrl) || branding.appLogoUrl,
+          avatarUrl: sanitizeSafeImageSrc(parsed.avatarUrl) || DEFAULT_AVATAR_URL,
+          paymentQrDataUrl: sanitizeSafeImageSrc(parsed.paymentQrDataUrl),
         };
       } catch {
         // fallback below
       }
     }
-    return {
-      ...SEED_PROFILE,
-      appName: branding.appName || SEED_PROFILE.appName,
-      appLogoUrl: branding.appLogoUrl,
-    };
+    return { ...DEFAULT_PROFILE };
   });
 
-  const [accounts, setAccounts] = useState<FinancialAccount[]>(() => {
-    const saved = localStorage.getItem('omnihub_accounts');
-    return saved ? JSON.parse(saved) : SEED_ACCOUNTS;
-  });
-
-  const [todos, setTodos] = useState<TodoItem[]>(() => {
-    const saved = localStorage.getItem('omnihub_todos');
-    return saved ? JSON.parse(saved) : SEED_TODOS;
-  });
-
-  const [transactions, setTransactions] = useState<FinanceTransaction[]>(() => {
-    const saved = localStorage.getItem('omnihub_transactions');
-    return saved ? JSON.parse(saved) : SEED_TRANSACTIONS;
-  });
-
-  const [debts, setDebts] = useState<DebtReceivable[]>(() => {
-    const saved = localStorage.getItem('omnihub_debts');
-    return saved ? JSON.parse(saved) : SEED_DEBTS;
-  });
-
-  const [myDebts, setMyDebts] = useState<MyDebtLiability[]>(() => {
-    const saved = localStorage.getItem('omnihub_my_debts');
-    return saved ? JSON.parse(saved) : SEED_MY_DEBTS;
-  });
-
-  const [dailyAudits, setDailyAudits] = useState<DailyAuditRecord[]>(() => {
-    const saved = localStorage.getItem('omnihub_daily_audits');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [categoryBudgets, setCategoryBudgets] = useState<CategoryBudget[]>(() => {
-    const saved = localStorage.getItem('omnihub_budgets');
-    return saved ? JSON.parse(saved) : SEED_CATEGORY_BUDGETS;
-  });
-
-  const [notes, setNotes] = useState<NoteItem[]>(() => {
-    const saved = localStorage.getItem('omnihub_notes');
-    return saved ? JSON.parse(saved) : SEED_NOTES;
-  });
-
-  const [noteCategories, setNoteCategories] = useState<string[]>(() => {
-    const saved = localStorage.getItem('omnihub_note_categories');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // fallback
-      }
-    }
-    return Array.from(new Set([...SEED_NOTE_CATEGORIES, ...SEED_NOTES.map(n => n.category)]));
-  });
-
-  const [habits, setHabits] = useState<HabitItem[]>(() => {
-    const saved = localStorage.getItem('omnihub_habits');
-    return saved ? JSON.parse(saved) : SEED_HABITS;
-  });
-
-  const [logbookEntries, setLogbookEntries] = useState<LogbookEntry[]>(() => {
-    const saved = localStorage.getItem('omnihub_logbook_entries');
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'log-1',
-        date: new Date().toISOString().split('T')[0],
-        project: "Q'Hub Super App Development",
-        hours: 8,
-        category: 'Development',
-        description: 'Membangun modul logbook kerja dan integrasi export Excel (.xls).',
-        status: 'Completed',
-        createdAt: new Date().toISOString()
-      }
-    ];
-  });
-
-  const [savedBarcodes, setSavedBarcodes] = useState<SavedBarcode[]>(() => {
-    const saved = localStorage.getItem('omnihub_saved_barcodes');
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  const [accounts, setAccounts] = useState<FinancialAccount[]>(() =>
+    readJsonStorage<FinancialAccount[]>('omnihub_accounts', [])
+  );
+  const [todos, setTodos] = useState<TodoItem[]>(() =>
+    readJsonStorage<TodoItem[]>('omnihub_todos', [])
+  );
+  const [transactions, setTransactions] = useState<FinanceTransaction[]>(() =>
+    readJsonStorage<FinanceTransaction[]>('omnihub_transactions', [])
+  );
+  const [debts, setDebts] = useState<DebtReceivable[]>(() =>
+    readJsonStorage<DebtReceivable[]>('omnihub_debts', [])
+  );
+  const [myDebts, setMyDebts] = useState<MyDebtLiability[]>(() =>
+    readJsonStorage<MyDebtLiability[]>('omnihub_my_debts', [])
+  );
+  const [dailyAudits, setDailyAudits] = useState<DailyAuditRecord[]>(() =>
+    readJsonStorage<DailyAuditRecord[]>('omnihub_daily_audits', [])
+  );
+  const [categoryBudgets, setCategoryBudgets] = useState<CategoryBudget[]>(() =>
+    readJsonStorage<CategoryBudget[]>('omnihub_budgets', [])
+  );
+  const [notes, setNotes] = useState<NoteItem[]>(() =>
+    readJsonStorage<NoteItem[]>('omnihub_notes', [])
+  );
+  const [noteCategories, setNoteCategories] = useState<string[]>(() =>
+    readJsonStorage<string[]>('omnihub_note_categories', DEFAULT_NOTE_CATEGORIES)
+  );
+  const [habits, setHabits] = useState<HabitItem[]>(() =>
+    readJsonStorage<HabitItem[]>('omnihub_habits', [])
+  );
+  const [logbookEntries, setLogbookEntries] = useState<LogbookEntry[]>(() =>
+    readJsonStorage<LogbookEntry[]>('omnihub_logbook_entries', [])
+  );
+  const [savedBarcodes, setSavedBarcodes] = useState<SavedBarcode[]>(() =>
+    readJsonStorage<SavedBarcode[]>('omnihub_saved_barcodes', [])
+  );
   const [reimbursements, setReimbursements] = useState<ReimbursementItem[]>(() => {
-    const saved = localStorage.getItem('omnihub_reimbursements');
-    if (saved) {
-      try {
-        const parsed: ReimbursementItem[] = JSON.parse(saved);
-        return parsed.map(item => {
-          if (item.typeProject === 'Online') {
-            return {
-              ...item,
-              totalDays: Math.max(1, Math.round((item.wdDays + item.weDays) / 2))
-            };
-          }
-          return item;
-        });
-      } catch {
-        return SEED_REIMBURSEMENTS;
+    const parsed = readJsonStorage<ReimbursementItem[]>('omnihub_reimbursements', []);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(item => {
+      if (item.typeProject === 'Online') {
+        return {
+          ...item,
+          totalDays: Math.max(1, Math.round((item.wdDays + item.weDays) / 2))
+        };
       }
-    }
-    return SEED_REIMBURSEMENTS;
+      return item;
+    });
   });
 
-  const [reimburseRates, setReimburseRates] = useState<ReimburseRate[]>(() => {
-    const saved = localStorage.getItem('omnihub_reimburse_rates');
-    return saved ? JSON.parse(saved) : DEFAULT_REIMBURSE_RATES;
-  });
+  const [reimburseRates, setReimburseRates] = useState<ReimburseRate[]>(() =>
+    readJsonStorage<ReimburseRate[]>('omnihub_reimburse_rates', DEFAULT_REIMBURSE_RATES)
+  );
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -821,6 +396,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reimburseRates
   };
 
+  // Fetch global branding from PostgreSQL on mount (public, works before login)
+  useEffect(() => {
+    let active = true;
+    fetch('/api/branding')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data || typeof data !== 'object') return;
+        setAppBranding({
+          appName: typeof data.appName === 'string' && data.appName.trim() ? data.appName.trim() : "Q'Hub",
+          appLogoUrl: sanitizeSafeImageSrc(data.appLogoUrl || undefined),
+        });
+      })
+      .catch(() => {
+        // fallback to local cache
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Sync theme
   useEffect(() => {
     const root = document.documentElement;
@@ -850,17 +445,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem('omnihub_reimburse_rates', JSON.stringify(reimburseRates)); }, [reimburseRates]);
 
   useEffect(() => {
-    const appTitle = profile.appName?.trim() || "Q'Hub";
+    const appTitle = appBranding.appName?.trim() || "Q'Hub";
     document.title = `${appTitle} - Personal Super App & Management Suite`;
     try {
       localStorage.setItem('omnihub_branding', JSON.stringify({
         appName: appTitle,
-        appLogoUrl: sanitizeSafeImageSrc(profile.appLogoUrl) || undefined,
+        appLogoUrl: sanitizeSafeImageSrc(appBranding.appLogoUrl) || undefined,
       }));
     } catch {
       // ignore storage quota errors
     }
-  }, [profile.appName, profile.appLogoUrl]);
+  }, [appBranding.appName, appBranding.appLogoUrl]);
 
   const showToast = (message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info') => {
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
@@ -914,11 +509,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!ws || typeof ws !== 'object') return;
     if (ws.profile) {
       setProfile({
-        name: ws.profile.name || SEED_PROFILE.name,
+        name: ws.profile.name || DEFAULT_PROFILE.name,
         title: ws.profile.title || '',
-        avatarUrl: sanitizeSafeImageSrc(ws.profile.avatarUrl) || SEED_PROFILE.avatarUrl,
-        appName: ws.profile.appName || SEED_PROFILE.appName,
-        appLogoUrl: sanitizeSafeImageSrc(ws.profile.appLogoUrl),
+        avatarUrl: sanitizeSafeImageSrc(ws.profile.avatarUrl) || DEFAULT_AVATAR_URL,
         currencySymbol: ws.profile.currencySymbol || 'Rp',
         monthlyBudget: Number(ws.profile.monthlyBudget) || 0,
         bankAccountDetails: ws.profile.bankAccountDetails || '',
@@ -953,6 +546,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (Array.isArray(ws.reimburseRates)) setReimburseRates(ws.reimburseRates);
   };
 
+  const resetPrivateWorkspaceToDefaults = (displayName?: string) => {
+    clearUserWorkspaceStorage();
+    const defaultProfile: UserProfile = {
+      ...DEFAULT_PROFILE,
+      name: displayName?.trim() || DEFAULT_PROFILE.name,
+    };
+
+    setProfile(defaultProfile);
+    setAccounts([]);
+    setTodos([]);
+    setTransactions([]);
+    setDebts([]);
+    setMyDebts([]);
+    setDailyAudits([]);
+    setCategoryBudgets([]);
+    setNotes([]);
+    setNoteCategories(DEFAULT_NOTE_CATEGORIES);
+    setHabits([]);
+    setLogbookEntries([]);
+    setSavedBarcodes([]);
+    setReimbursements([]);
+    setReimburseRates(DEFAULT_REIMBURSE_RATES);
+
+    return {
+      profile: defaultProfile,
+      theme,
+      noteCategories: DEFAULT_NOTE_CATEGORIES,
+      accounts: [],
+      transactions: [],
+      debts: [],
+      myDebts: [],
+      categoryBudgets: [],
+      todos: [],
+      notes: [],
+      habits: [],
+      logbookEntries: [],
+      savedBarcodes: [],
+      reimbursements: [],
+      reimburseRates: DEFAULT_REIMBURSE_RATES,
+    };
+  };
+
   const syncFullWorkspaceToPostgres = async (options?: { overwriteExisting?: boolean; overrideWorkspace?: Record<string, unknown> }) => {
     const overwriteExisting = options?.overwriteExisting ?? true;
     await apiFetch('/api/workspace/sync', {
@@ -966,14 +601,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     lastSyncedAtRef.current = Date.now();
   };
 
-  const loadWorkspaceFromPostgres = async (options?: { silent?: boolean; seedStateOverride?: Record<string, unknown> }) => {
+  const loadWorkspaceFromPostgres = async (options?: {
+    silent?: boolean;
+    seedStateOverride?: Record<string, unknown>;
+    displayName?: string;
+  }) => {
     if (!hasActiveSession()) return;
     if (!options?.silent) setSyncStatus('syncing');
     try {
       const data = await apiFetch<{ initialized: boolean; workspace: any }>('/api/workspace');
       dbConfiguredRef.current = true;
       if (!data.initialized) {
-        await syncFullWorkspaceToPostgres({ overwriteExisting: false, overrideWorkspace: options?.seedStateOverride });
+        const cleanSeed = options?.seedStateOverride ?? resetPrivateWorkspaceToDefaults(options?.displayName);
+        await syncFullWorkspaceToPostgres({ overwriteExisting: false, overrideWorkspace: cleanSeed });
       } else {
         applyWorkspaceSnapshot(data.workspace);
       }
@@ -1086,18 +726,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
+      const prevUid = localStorage.getItem('omnihub_active_uid');
+      const displayName = firebaseUser.displayName || firebaseUser.email || 'Pengguna Google';
+      if (prevUid !== firebaseUser.uid) {
+        resetPrivateWorkspaceToDefaults(displayName);
+      }
+      localStorage.setItem('omnihub_active_uid', firebaseUser.uid);
+
       localTokenRef.current = null;
       setUser(firebaseUser);
       setAuthUser({
         uid: firebaseUser.uid,
         email: firebaseUser.email || undefined,
-        displayName: firebaseUser.displayName || firebaseUser.email || 'Pengguna Google',
+        displayName,
         authType: 'google',
       });
       setAuthLoading(false);
       dbConfiguredRef.current = true;
       if (!cancelled) {
-        await loadWorkspaceFromPostgres();
+        await loadWorkspaceFromPostgres({ displayName });
       }
     });
 
@@ -1140,62 +787,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const resetPrivateWorkspaceToDefaults = () => {
-    const branding = readStoredBranding();
-    const defaultProfile: UserProfile = {
-      ...SEED_PROFILE,
-      appName: branding.appName || SEED_PROFILE.appName,
-      appLogoUrl: branding.appLogoUrl,
-    };
-    const defaultNoteCategories = Array.from(new Set([...SEED_NOTE_CATEGORIES, ...SEED_NOTES.map(n => n.category)]));
-    const defaultLogbook: LogbookEntry[] = [
-      {
-        id: 'log-1',
-        date: new Date().toISOString().split('T')[0],
-        project: "Q'Hub Super App Development",
-        hours: 8,
-        category: 'Development',
-        description: 'Membangun modul logbook kerja dan integrasi export Excel (.xls).',
-        status: 'Completed',
-        createdAt: new Date().toISOString(),
-      },
-    ];
-
-    setProfile(defaultProfile);
-    setAccounts(SEED_ACCOUNTS);
-    setTodos(SEED_TODOS);
-    setTransactions(SEED_TRANSACTIONS);
-    setDebts(SEED_DEBTS);
-    setMyDebts(SEED_MY_DEBTS);
-    setDailyAudits([]);
-    setCategoryBudgets(SEED_CATEGORY_BUDGETS);
-    setNotes(SEED_NOTES);
-    setNoteCategories(defaultNoteCategories);
-    setHabits(SEED_HABITS);
-    setLogbookEntries(defaultLogbook);
-    setSavedBarcodes([]);
-    setReimbursements(SEED_REIMBURSEMENTS);
-    setReimburseRates(DEFAULT_REIMBURSE_RATES);
-
-    return {
-      profile: defaultProfile,
-      theme,
-      noteCategories: defaultNoteCategories,
-      accounts: SEED_ACCOUNTS,
-      transactions: SEED_TRANSACTIONS,
-      debts: SEED_DEBTS,
-      myDebts: SEED_MY_DEBTS,
-      categoryBudgets: SEED_CATEGORY_BUDGETS,
-      todos: SEED_TODOS,
-      notes: SEED_NOTES,
-      habits: SEED_HABITS,
-      logbookEntries: defaultLogbook,
-      savedBarcodes: [],
-      reimbursements: SEED_REIMBURSEMENTS,
-      reimburseRates: DEFAULT_REIMBURSE_RATES,
-    };
-  };
-
   const signInWithUsernamePassword = async (
     username: string,
     password: string
@@ -1217,11 +808,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (auth.currentUser) {
         await signOut(auth).catch(() => {});
       }
+      const prevUid = localStorage.getItem('omnihub_active_uid');
+      if (prevUid !== data.user.uid) {
+        resetPrivateWorkspaceToDefaults(data.user.displayName);
+      }
+      localStorage.setItem('omnihub_active_uid', data.user.uid);
+
       localTokenRef.current = data.token;
       dbConfiguredRef.current = true;
       setUser(null);
       setAuthUser(data.user as AuthUser);
-      await loadWorkspaceFromPostgres();
+      await loadWorkspaceFromPostgres({ displayName: data.user.displayName });
       showToast(`Selamat datang kembali, ${data.user.displayName}!`, 'success');
       return { ok: true };
     } catch {
@@ -1252,16 +849,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (auth.currentUser) {
         await signOut(auth).catch(() => {});
       }
-      const cleanSeed = resetPrivateWorkspaceToDefaults();
-      cleanSeed.profile = { ...cleanSeed.profile, name: data.user.displayName };
-      setProfile(cleanSeed.profile);
+      const cleanSeed = resetPrivateWorkspaceToDefaults(data.user.displayName);
+      localStorage.setItem('omnihub_active_uid', data.user.uid);
 
       localTokenRef.current = data.token;
       dbConfiguredRef.current = true;
       setUser(null);
       setAuthUser(data.user as AuthUser);
-      await loadWorkspaceFromPostgres({ seedStateOverride: cleanSeed });
-      showToast(`Akun @${data.user.username} berhasil dibuat & terhubung ke PostgreSQL!`, 'success');
+      await loadWorkspaceFromPostgres({ seedStateOverride: cleanSeed, displayName: data.user.displayName });
+      showToast(`Akun @${data.user.username} berhasil dibuat dengan data bersih (0)!`, 'success');
       return { ok: true };
     } catch {
       setSyncStatus('local');
@@ -1272,6 +868,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const signOutUser = async () => {
     try {
       localTokenRef.current = null;
+      localStorage.removeItem('omnihub_active_uid');
       if (auth.currentUser) {
         await signOut(auth);
       }
@@ -1320,6 +917,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const updateAppBranding = async (updates: Partial<AppBranding>) => {
+    const nextBranding: AppBranding = { ...appBranding };
+    if (updates.appName !== undefined) {
+      nextBranding.appName = updates.appName.trim() || "Q'Hub";
+    }
+    if ('appLogoUrl' in updates) {
+      if (!updates.appLogoUrl) {
+        nextBranding.appLogoUrl = undefined;
+      } else {
+        const safeLogo = sanitizeSafeImageSrc(updates.appLogoUrl);
+        if (!safeLogo) {
+          showToast('Format atau ukuran logo aplikasi tidak valid.', 'warning');
+          return;
+        }
+        nextBranding.appLogoUrl = safeLogo;
+      }
+    }
+
+    setAppBranding(nextBranding);
+
+    if (hasActiveSession()) {
+      try {
+        await apiFetch('/api/branding', {
+          method: 'PUT',
+          body: JSON.stringify({
+            appName: nextBranding.appName,
+            appLogoUrl: nextBranding.appLogoUrl ?? '',
+          }),
+        });
+        showToast('Logo & nama aplikasi global diperbarui!', 'success');
+      } catch (err) {
+        if (err instanceof ApiRequestError && err.code === 'DATABASE_NOT_CONFIGURED') {
+          showToast('Logo aplikasi diperbarui secara lokal.', 'success');
+        } else {
+          showToast('Gagal menyimpan logo aplikasi global ke database.', 'error');
+        }
+      }
+    } else {
+      showToast('Logo & nama aplikasi diperbarui', 'success');
+    }
+  };
+
   const updateProfile = (updates: Partial<UserProfile>) => {
     const cleanedUpdates: Partial<UserProfile> = { ...updates };
     if (cleanedUpdates.avatarUrl !== undefined) {
@@ -1329,19 +968,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         delete cleanedUpdates.avatarUrl;
       } else if (safeAvatar) {
         cleanedUpdates.avatarUrl = safeAvatar;
-      }
-    }
-    if ('appLogoUrl' in cleanedUpdates) {
-      if (!cleanedUpdates.appLogoUrl) {
-        cleanedUpdates.appLogoUrl = undefined;
-      } else {
-        const safeLogo = sanitizeSafeImageSrc(cleanedUpdates.appLogoUrl);
-        if (!safeLogo) {
-          showToast('Format atau ukuran logo aplikasi tidak valid.', 'warning');
-          delete cleanedUpdates.appLogoUrl;
-        } else {
-          cleanedUpdates.appLogoUrl = safeLogo;
-        }
       }
     }
     if (cleanedUpdates.paymentQrDataUrl !== undefined) {
@@ -1360,15 +986,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProfile(prev => ({ ...prev, ...cleanedUpdates }));
     if (hasActiveSession()) {
       const cloudPayload: Record<string, unknown> = { ...cleanedUpdates };
-      if ('appLogoUrl' in cleanedUpdates && !cleanedUpdates.appLogoUrl) {
-        cloudPayload.appLogoUrl = '';
-      }
       if ('paymentQrDataUrl' in cleanedUpdates && !cleanedUpdates.paymentQrDataUrl) {
         cloudPayload.paymentQrDataUrl = '';
       }
       void cloudUpdateDoc('profile', 'main', cloudPayload);
     }
-    showToast('Profil & pengaturan aplikasi diperbarui', 'success');
+    showToast('Profil & pengaturan akun diperbarui', 'success');
   };
 
   // Todo operations
@@ -2370,16 +1993,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const resetAllData = () => {
-    setProfile(SEED_PROFILE);
-    setAccounts(SEED_ACCOUNTS);
-    setTodos(SEED_TODOS);
-    setTransactions(SEED_TRANSACTIONS);
-    setDebts(SEED_DEBTS);
-    setMyDebts(SEED_MY_DEBTS);
-    setCategoryBudgets(SEED_CATEGORY_BUDGETS);
-    setNotes(SEED_NOTES);
-    setHabits(SEED_HABITS);
-    showToast('Data lokal dikembalikan ke template bawaan', 'info');
+    const cleanSeed = resetPrivateWorkspaceToDefaults(authUser?.displayName || profile.name);
+    if (hasActiveSession()) {
+      void syncFullWorkspaceToPostgres({ overwriteExisting: true, overrideWorkspace: cleanSeed }).catch(() => {});
+    }
+    showToast('Semua data workspace direset ke 0 (kosong). Logo aplikasi tetap terjaga.', 'info');
   };
 
   return (
@@ -2399,6 +2017,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveTab,
         theme,
         toggleTheme,
+        appBranding,
+        updateAppBranding,
         profile,
         updateProfile,
         accounts,

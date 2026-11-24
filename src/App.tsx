@@ -141,15 +141,15 @@ const MainShell: React.FC = () => {
 };
 
 const AuthGate: React.FC = () => {
-  const { authUser, authLoading, profile } = useApp();
-  const appName = profile.appName?.trim() || "Q'Hub";
+  const { authUser, authLoading, appBranding } = useApp();
+  const appName = appBranding.appName?.trim() || "Q'Hub";
 
   if (authLoading) {
     return (
       <div className="min-h-screen bg-neutral-100 dark:bg-neutral-950 flex flex-col items-center justify-center gap-3 text-neutral-600 dark:text-neutral-300">
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold text-xl shadow-md overflow-hidden">
-          {profile.appLogoUrl ? (
-            <img src={profile.appLogoUrl} alt={appName} className="w-full h-full object-cover" />
+          {appBranding.appLogoUrl ? (
+            <img src={appBranding.appLogoUrl} alt={appName} className="w-full h-full object-cover" />
           ) : (
             <span>Ω</span>
           )}
