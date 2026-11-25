@@ -17,7 +17,11 @@ import {
   QrCode,
   Trash2,
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  KeyRound,
+  Link2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -30,6 +34,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     authUser,
     syncStatus,
     signInWithGoogle,
+    linkUsernamePassword,
+    linkGoogleAccount,
     signOutUser,
     pushLocalWorkspaceToCloud,
     appBranding,
@@ -55,6 +61,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [isCompressingLogo, setIsCompressingLogo] = useState(false);
   const [isCompressingQr, setIsCompressingQr] = useState(false);
 
+  // Unified multi-method login linking state
+  const [showCredForm, setShowCredForm] = useState(false);
+  const [linkUsername, setLinkUsername] = useState('');
+  const [linkPassword, setLinkPassword] = useState('');
+  const [linkCurrentPassword, setLinkCurrentPassword] = useState('');
+  const [showLinkPassword, setShowLinkPassword] = useState(false);
+  const [credError, setCredError] = useState<string | null>(null);
+  const [isLinkingCreds, setIsLinkingCreds] = useState(false);
+  const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -71,8 +87,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setBankAccountDetails(profile.bankAccountDetails || '');
       setAvatarUrl(profile.avatarUrl);
       setPaymentQrDataUrl(profile.paymentQrDataUrl || '');
+      setShowCredForm(false);
+      setLinkUsername(authUser?.username || '');
+      setLinkPassword('');
+      setLinkCurrentPassword('');
+      setCredError(null);
     }
-  }, [isOpen, profile, appBranding]);
+  }, [isOpen, profile, appBranding, authUser?.username]);
 
   if (!isOpen) return null;
 
@@ -265,27 +286,214 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <span>Masuk dengan Google untuk Aktifkan Sync</span>
               </button>
             ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={pushLocalWorkspaceToCloud}
-                  className="flex-1 py-2 px-3 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-neutral-900 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-                  <span>Paksa Sinkronkan Ulang</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    void signOutUser();
-                  }}
-                  className="py-2 px-3 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-white dark:bg-neutral-900 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Keluar Akun</span>
-                </button>
-              </div>
+              <>
+                <div className="p-3 rounded-xl bg-white/80 dark:bg-neutral-900/80 border border-indigo-200/70 dark:border-indigo-900/40 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-300 flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>Metode Login Akun Ini (1 Akun Bisa Keduanya)</span>
+                    </span>
+                  </div>
+
+                  {/* Google Sync Status / Link */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-1.5 border-t border-neutral-200/70 dark:border-neutral-800">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">
+                        Google CloudSync
+                      </p>
+                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
+                        {(authUser.hasGoogle || authUser.authType === 'google')
+                          ? `Terhubung: ${authUser.googleEmail || authUser.email}`
+                          : 'Belum terhubung ke akun Google'}
+                      </p>
+                    </div>
+                    {!(authUser.hasGoogle || authUser.authType === 'google') ? (
+                      <button
+                        type="button"
+                        disabled={isLinkingGoogle}
+                        onClick={async () => {
+                          setIsLinkingGoogle(true);
+                          try {
+                            await linkGoogleAccount();
+                          } finally {
+                            setIsLinkingGoogle(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-[11px] font-semibold hover:opacity-90 cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        {isLinkingGoogle ? 'Menghubungkan...' : 'Hubungkan Google'}
+                      </button>
+                    ) : (
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                        ✓ Aktif
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Username & Password Status / Link */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-1.5 border-t border-neutral-200/70 dark:border-neutral-800">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">
+                        Username & Password
+                      </p>
+                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
+                        {(authUser.hasPassword || authUser.authType === 'local') && authUser.username
+                          ? `Terhubung: @${authUser.username}`
+                          : 'Belum diatur — tambahkan agar bisa login tanpa Google'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCredForm(prev => !prev);
+                        setCredError(null);
+                        setLinkUsername(authUser.username || '');
+                        setLinkPassword('');
+                        setLinkCurrentPassword('');
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 cursor-pointer shrink-0 flex items-center gap-1"
+                    >
+                      <KeyRound className="w-3 h-3" />
+                      <span>
+                        {(authUser.hasPassword || authUser.authType === 'local')
+                          ? (showCredForm ? 'Tutup' : 'Ubah Password')
+                          : (showCredForm ? 'Batal' : 'Tambah Username & Pass')}
+                      </span>
+                    </button>
+                  </div>
+
+                  {showCredForm && (
+                    <div className="pt-2 border-t border-neutral-200/70 dark:border-neutral-800 space-y-2.5">
+                      {credError && (
+                        <p className="text-[11px] text-rose-600 dark:text-rose-400 font-medium">
+                          {credError}
+                        </p>
+                      )}
+                      <div>
+                        <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                          Username
+                        </label>
+                        <input
+                          type="text"
+                          value={linkUsername}
+                          onChange={(e) => setLinkUsername(e.target.value)}
+                          placeholder="contoh: alif.pratama (3-32 karakter)"
+                          className="w-full px-3 py-1.5 rounded-lg bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100"
+                        />
+                      </div>
+
+                      {(authUser.hasPassword || authUser.authType === 'local') && (
+                        <div>
+                          <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                            Password Saat Ini
+                          </label>
+                          <input
+                            type="password"
+                            value={linkCurrentPassword}
+                            onChange={(e) => setLinkCurrentPassword(e.target.value)}
+                            placeholder="Masukkan password lama"
+                            className="w-full px-3 py-1.5 rounded-lg bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100"
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                          {(authUser.hasPassword || authUser.authType === 'local') ? 'Password Baru (min. 6 karakter)' : 'Password (min. 6 karakter)'}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showLinkPassword ? 'text' : 'password'}
+                            value={linkPassword}
+                            onChange={(e) => setLinkPassword(e.target.value)}
+                            placeholder="Minimal 6 karakter"
+                            className="w-full pl-3 pr-8 py-1.5 rounded-lg bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-neutral-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowLinkPassword(prev => !prev)}
+                            className="p-1 text-neutral-400 hover:text-neutral-600 absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                          >
+                            {showLinkPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowCredForm(false)}
+                          className="px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-[11px] font-semibold cursor-pointer"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isLinkingCreds}
+                          onClick={async () => {
+                            setCredError(null);
+                            const cleanU = linkUsername.trim().toLowerCase();
+                            if (!/^[a-z0-9._-]{3,32}$/.test(cleanU)) {
+                              setCredError('Username harus 3–32 karakter (huruf kecil, angka, ., _, -).');
+                              return;
+                            }
+                            if (linkPassword.length < 6) {
+                              setCredError('Password minimal 6 karakter.');
+                              return;
+                            }
+                            if ((authUser.hasPassword || authUser.authType === 'local') && !linkCurrentPassword) {
+                              setCredError('Masukkan password saat ini untuk mengganti password.');
+                              return;
+                            }
+                            setIsLinkingCreds(true);
+                            try {
+                              const res = await linkUsernamePassword(
+                                cleanU,
+                                linkPassword,
+                                (authUser.hasPassword || authUser.authType === 'local') ? linkCurrentPassword : undefined
+                              );
+                              if (res.ok) {
+                                setShowCredForm(false);
+                                setLinkPassword('');
+                                setLinkCurrentPassword('');
+                              } else if (res.error) {
+                                setCredError(res.error);
+                              }
+                            } finally {
+                              setIsLinkingCreds(false);
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                        >
+                          {isLinkingCreds ? 'Menyimpan...' : 'Simpan Login Username'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={pushLocalWorkspaceToCloud}
+                    className="flex-1 py-2 px-3 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-neutral-900 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                    <span>Paksa Sinkronkan Ulang</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      void signOutUser();
+                    }}
+                    className="py-2 px-3 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-white dark:bg-neutral-900 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Keluar Akun</span>
+                  </button>
+                </div>
+              </>
             )}
           </div>
 

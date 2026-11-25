@@ -4,6 +4,7 @@ export type NavigationTab =
   | 'finance' 
   | 'reimburse'
   | 'removebg'
+  | 'converter'
   | 'notes' 
   | 'pdftools' 
   | 'barcode' 
@@ -56,7 +57,7 @@ export type CoaClass = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
 export type NormalBalance = 'debit' | 'credit';
 
 export interface ChartOfAccount {
-  code: string; // e.g., '1-1100', '1-1201', '2-1100', '4-1100', '5-1100'
+  code: string; // e.g., '1101', '1102', '2101', '4101', '5101'
   name: string; // e.g., 'Kas Tunai di Tangan', 'Bank BCA Utama', 'Beban Makanan'
   category: CoaClass; // 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
   subCategory: string; // e.g., 'Kas & Bank', 'Piutang', 'Kewajiban Lancar', 'Pendapatan Usaha', 'Beban Operasional'
@@ -94,7 +95,7 @@ export interface FinancialAccount {
   initialBalance: number; // Saldo awal yang di-set / di-upload
   accountNumber?: string; // No rekening / No HP
   color?: string; // hex color for card badge
-  coaCode?: string; // Associated COA code, e.g. '1-1201'
+  coaCode?: string; // Associated COA code, e.g. '1102'
   notes?: string;
   createdAt?: string;
 }
@@ -192,8 +193,10 @@ export interface MyDebtLiability {
   dueDate: string; // YYYY-MM-DD
   issuedDate: string; // YYYY-MM-DD
   status: 'unpaid' | 'partial' | 'paid';
-  sourceTransactionId?: string; // ID transaksi pengeluaran kredit yang menimbulkan hutang ini
-  sourceAccountId?: string; // Akun yang digunakan/terkait
+  sourceTransactionId?: string; // ID transaksi pengeluaran/pencairan yang menimbulkan hutang ini
+  sourceAccountId?: string; // Akun yang digunakan/menerima dana
+  sourceAccountName?: string; // Nama akun penerima dana
+  addToAccount?: boolean; // Apakah nominal hutang menambah saldo akun yang dipilih
   category?: string;
   notes?: string;
 }
@@ -256,6 +259,9 @@ export interface AuthUser {
   email?: string;
   displayName: string;
   username?: string;
+  googleEmail?: string;
+  hasPassword?: boolean;
+  hasGoogle?: boolean;
   authType: 'google' | 'local';
 }
 

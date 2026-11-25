@@ -107,7 +107,7 @@ export const LoginScreen: React.FC = () => {
                 {appName}
               </h1>
               <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                Masuk ke workspace Anda menggunakan akun Username/Password atau Google CloudSync.
+                Masuk dengan Username/Password atau Google CloudSync — keduanya bisa dihubungkan ke 1 akun yang sama di Pengaturan.
               </p>
             </div>
           </div>

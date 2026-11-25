@@ -66,6 +66,8 @@ export const qhubUsers = pgTable('qhub_users', {
   uid: text('uid').primaryKey(),
   email: text('email').notNull(),
   displayName: text('display_name').notNull(),
+  googleUid: text('google_uid').unique(),
+  googleEmail: text('google_email'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -93,10 +95,22 @@ export const qhubProfiles = pgTable('qhub_profiles', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export interface StoredCustomCoa {
+  code: string;
+  name: string;
+  category: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  subCategory: string;
+  normalBalance: 'debit' | 'credit';
+  description?: string;
+  linkedAccountId?: string;
+  isCustom?: boolean;
+}
+
 export const qhubPreferences = pgTable('qhub_preferences', {
   userId: text('user_id').primaryKey().references(() => qhubUsers.uid, { onDelete: 'cascade' }),
   theme: text('theme').notNull().default('dark'),
   noteCategories: jsonb('note_categories').$type<string[]>().notNull().default([]),
+  customCoa: jsonb('custom_coa').$type<StoredCustomCoa[]>().notNull().default([]),
   initialized: boolean('initialized').notNull().default(false),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -181,6 +195,7 @@ export const qhubMyDebts = pgTable('qhub_my_debts', {
   status: text('status').notNull(),
   sourceTransactionId: text('source_transaction_id'),
   sourceAccountId: text('source_account_id'),
+  addToAccount: boolean('add_to_account'),
   category: text('category'),
   notes: text('notes'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

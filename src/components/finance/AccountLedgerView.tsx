@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import {
   getCoaForFinancialAccount,
-  getCoaForCategory,
+  getEffectiveContraCoaForTransaction,
   isTransactionIncludedInLedger,
   isContraVoidTransaction,
   formatVoidReason
@@ -43,6 +43,7 @@ interface AccountLedgerViewProps {
   onAddTransactionForAccount: (accountId: string) => void;
   onEditInitialBalance: (account: FinancialAccount) => void;
   onDeleteTransaction: (id: string) => void;
+  onEditTransaction?: (tx: FinanceTransaction) => void;
   onVoidTransaction?: (id: string) => void;
   onNavigateToCoa: () => void;
   onOpenTransfer?: (sourceAccountId: string, type: 'cash_withdrawal' | 'transfer' | 'ewallet_topup' | 'cash_deposit') => void;
@@ -59,6 +60,7 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
   onAddTransactionForAccount,
   onEditInitialBalance,
   onDeleteTransaction,
+  onEditTransaction,
   onVoidTransaction,
   onNavigateToCoa,
   onOpenTransfer
@@ -101,10 +103,8 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
         }
       }
 
-      // Identify Contra Account in standard double entry accounting (honor adjustment COA override)
-      const contraCoa = tx.coaCode
-        ? { code: tx.coaCode, name: tx.coaName || 'Penyesuaian COA' }
-        : getCoaForCategory(tx.category, tx.type, allCoaList);
+      // Identify Contra Account in standard double entry accounting (honor explicit COA or normalized legacy COA)
+      const contraCoa = getEffectiveContraCoaForTransaction(tx, allCoaList);
 
       return {
         ...tx,
@@ -265,7 +265,7 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
             <p className="text-base font-bold font-mono text-neutral-800 dark:text-neutral-200 tabular-nums">
               {currencySymbol} {account.initialBalance.toLocaleString('id-ID')}
             </p>
-            <span className="text-[10px] text-neutral-400">Modal Awal Akun (3-1100)</span>
+            <span className="text-[10px] text-neutral-400">Modal Awal Akun (3101)</span>
           </div>
 
           {/* 2. Total Masuk (Kredit) */}
@@ -448,6 +448,15 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
 
                       <td className="py-3 px-3 text-center">
                         <div className="flex items-center justify-center gap-1">
+                          {!m.isVoided && !isContra && !m.transferId && onEditTransaction && (
+                            <button
+                              onClick={() => onEditTransaction(m)}
+                              className="p-1 rounded text-neutral-400 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer transition-colors"
+                              title="Edit Transaksi & COA"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {!m.isVoided && !isContra && onVoidTransaction && (
                             <button
                               onClick={() => onVoidTransaction(m.id)}

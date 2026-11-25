@@ -27,382 +27,659 @@ export const formatVoidReason = (reason?: string): string => {
 };
 
 // =========================================================================
-// STANDARD CHART OF ACCOUNTS (COA) / BAGAN AKUN STANDAR AKUNTANSI (PSAK)
+// STANDARD CHART OF ACCOUNTS (COA) / BAGAN AKUN STANDAR KEUANGAN PRIBADI
 // =========================================================================
 
 export const BASE_CHART_OF_ACCOUNTS: ChartOfAccount[] = [
-  // 1-XXXX: ASET / AKTIVA (Normal: Debit)
+  // 1000 - ASET (Normal: Debit)
   {
-    code: '1-1100',
-    name: 'Kas Tunai di Tangan (Cash on Hand)',
+    code: '1101',
+    name: 'Kas Tunai (Cash on Hand)',
     category: 'asset',
-    subCategory: 'Kas & Setara Kas',
+    subCategory: 'Aset Lancar',
     normalBalance: 'debit',
-    description: 'Uang fisik tunai di dompet atau brankas'
+    description: 'Uang fisik di dompet atau brankas rumah'
   },
   {
-    code: '1-1201',
-    name: 'Bank BCA Utama',
+    code: '1102',
+    name: 'Bank - Rekening Operasional',
     category: 'asset',
-    subCategory: 'Kas di Bank',
+    subCategory: 'Aset Lancar',
     normalBalance: 'debit',
-    description: 'Rekening tabungan operasional & giro BCA'
+    description: 'Rekening utama untuk transaksi harian & terima gaji'
   },
   {
-    code: '1-1202',
-    name: 'Bank Mandiri Payroll',
+    code: '1103',
+    name: 'Bank - Rekening Tabungan',
     category: 'asset',
-    subCategory: 'Kas di Bank',
+    subCategory: 'Aset Lancar',
     normalBalance: 'debit',
-    description: 'Rekening bank penerimaan payroll Mandiri'
+    description: 'Rekening terpisah khusus simpanan & dana darurat'
   },
   {
-    code: '1-1299',
-    name: 'Rekening Bank Lainnya',
+    code: '1104',
+    name: 'Dompet Digital (E-Wallet)',
     category: 'asset',
-    subCategory: 'Kas di Bank',
+    subCategory: 'Aset Lancar',
     normalBalance: 'debit',
-    description: 'Rekening bank tambahan lainnya'
+    description: 'Saldo GoPay, OVO, Dana, ShopeePay, LinkAja'
   },
   {
-    code: '1-1301',
-    name: 'E-Wallet GoPay',
+    code: '1201',
+    name: 'Piutang Pribadi / Talangan',
     category: 'asset',
-    subCategory: 'Dompet Digital',
+    subCategory: 'Piutang',
     normalBalance: 'debit',
-    description: 'Saldo dompet elektronik GoPay'
+    description: 'Uang yang dipinjamkan ke teman/keluarga atau talangan'
   },
   {
-    code: '1-1302',
-    name: 'E-Wallet DANA',
+    code: '1301',
+    name: 'Deposito Berjangka',
     category: 'asset',
-    subCategory: 'Dompet Digital',
+    subCategory: 'Aset Investasi',
     normalBalance: 'debit',
-    description: 'Saldo dompet elektronik DANA'
+    description: 'Simpanan deposito di bank'
   },
   {
-    code: '1-1303',
-    name: 'E-Wallet OVO',
+    code: '1302',
+    name: 'Reksa Dana & Obligasi',
     category: 'asset',
-    subCategory: 'Dompet Digital',
+    subCategory: 'Aset Investasi',
     normalBalance: 'debit',
-    description: 'Saldo dompet elektronik OVO'
+    description: 'SBN (ORI, SBR, Sukuk), reksa dana pasar uang/saham'
   },
   {
-    code: '1-1399',
-    name: 'E-Wallet & Uang Elektronik Lainnya',
+    code: '1303',
+    name: 'Saham & Aset Kripto',
     category: 'asset',
-    subCategory: 'Dompet Digital',
+    subCategory: 'Aset Investasi',
     normalBalance: 'debit',
-    description: 'Saldo ShopeePay, LinkAja, dsb.'
+    description: 'Portofolio saham BEI/global atau aset digital'
   },
   {
-    code: '1-1400',
-    name: 'Piutang Pihak Ketiga (Accounts Receivable)',
+    code: '1304',
+    name: 'Logam Mulia / Emas',
     category: 'asset',
-    subCategory: 'Piutang Lancar',
+    subCategory: 'Aset Investasi',
     normalBalance: 'debit',
-    description: 'Tagihan pinjaman atau tagihan jasa kepada orang lain/klien'
+    description: 'Emas batangan atau tabungan emas'
   },
   {
-    code: '1-1500',
-    name: 'Uang Muka & Biaya Dibayar di Muka',
+    code: '1401',
+    name: 'Properti (Tanah & Bangunan)',
     category: 'asset',
-    subCategory: 'Aset Lancar Lainnya',
+    subCategory: 'Aset Tetap',
     normalBalance: 'debit',
-    description: 'Deposit, uang muka sewa atau langganan di muka'
+    description: 'Rumah tinggal, apartemen, atau tanah'
+  },
+  {
+    code: '1402',
+    name: 'Kendaraan',
+    category: 'asset',
+    subCategory: 'Aset Tetap',
+    normalBalance: 'debit',
+    description: 'Mobil atau sepeda motor pribadi'
+  },
+  {
+    code: '1403',
+    name: 'Elektronik & Peralatan Bernilai',
+    category: 'asset',
+    subCategory: 'Aset Tetap',
+    normalBalance: 'debit',
+    description: 'Laptop kerja, kamera, perangkat rumah tangga besar'
   },
 
-  // 2-XXXX: KEWAJIBAN / LIABILITAS (Normal: Kredit)
+  // 2000 - LIABILITAS (Normal: Kredit)
   {
-    code: '2-1100',
-    name: 'Hutang Usaha & Tagihan Pihak Ketiga (Accounts Payable)',
+    code: '2101',
+    name: 'Utang Kartu Kredit',
     category: 'liability',
-    subCategory: 'Kewajiban Jangka Pendek',
+    subCategory: 'Liabilitas Jangka Pendek',
     normalBalance: 'credit',
-    description: 'Hutang pembelian tempo atau kewajiban supplier'
+    description: 'Tagihan kartu kredit yang belum dibayar'
   },
   {
-    code: '2-1200',
-    name: 'Hutang PayLater & Kredit Konsumtif',
+    code: '2102',
+    name: 'Utang PayLater',
     category: 'liability',
-    subCategory: 'Kewajiban Jangka Pendek',
+    subCategory: 'Liabilitas Jangka Pendek',
     normalBalance: 'credit',
-    description: 'Kewajiban cicilan GoPay Later, SpayLater, Indodana, dsb.'
+    description: 'Tagihan Shopee PayLater, GoPay Later, Kredivo'
   },
   {
-    code: '2-1300',
-    name: 'Hutang Kartu Kredit (Credit Card Payable)',
+    code: '2103',
+    name: 'Utang Pribadi Jangka Pendek',
     category: 'liability',
-    subCategory: 'Kewajiban Jangka Pendek',
+    subCategory: 'Liabilitas Jangka Pendek',
     normalBalance: 'credit',
-    description: 'Tagihan kartu kredit berjalan'
+    description: 'Pinjaman sementara dari keluarga, teman, kasbon'
   },
   {
-    code: '2-1400',
-    name: 'Pinjaman Bank & Hutang Jangka Panjang',
+    code: '2201',
+    name: 'Utang KPR (Rumah)',
     category: 'liability',
-    subCategory: 'Kewajiban Jangka Panjang',
+    subCategory: 'Liabilitas Jangka Panjang',
     normalBalance: 'credit',
-    description: 'KPR, KKB, atau pinjaman modal usaha jangka panjang'
+    description: 'Sisa pokok pinjaman rumah/properti'
+  },
+  {
+    code: '2202',
+    name: 'Utang Kredit Kendaraan',
+    category: 'liability',
+    subCategory: 'Liabilitas Jangka Panjang',
+    normalBalance: 'credit',
+    description: 'Sisa pokok cicilan mobil atau motor'
+  },
+  {
+    code: '2203',
+    name: 'KTA / Pinjaman Lainnya',
+    category: 'liability',
+    subCategory: 'Liabilitas Jangka Panjang',
+    normalBalance: 'credit',
+    description: 'Sisa pokok pinjaman multiguna'
   },
 
-  // 3-XXXX: EKUITAS / MODAL (Normal: Kredit)
+  // 3000 - EKUITAS (Normal: Kredit)
   {
-    code: '3-1100',
-    name: 'Modal Awal Pemilik (Owner\'s Equity)',
+    code: '3101',
+    name: 'Saldo Awal Kekayaan Bersih',
     category: 'equity',
-    subCategory: 'Modal Pemilik',
+    subCategory: 'Modal & Saldo Awal',
     normalBalance: 'credit',
-    description: 'Saldo awal akumulatif kas & aset yang disetor pemilik'
+    description: 'Nilai awal aset dikurangi utang saat mulai pembukuan'
   },
   {
-    code: '3-1200',
-    name: 'Laba Ditahan / Akumulasi Saldo Berjalan (Retained Earnings)',
+    code: '3201',
+    name: 'Surplus / Defisit Ditahan',
     category: 'equity',
-    subCategory: 'Laba Ditahan',
+    subCategory: 'Akumulasi Surplus/Defisit',
     normalBalance: 'credit',
-    description: 'Akumulasi laba/rugi bersih dari periode berjalan'
-  },
-  {
-    code: '3-1300',
-    name: 'Prive / Penarikan Pribadi Pemilik (Owner\'s Drawings)',
-    category: 'equity',
-    subCategory: 'Penarikan Modal',
-    normalBalance: 'debit',
-    description: 'Penarikan dana untuk keperluan non-usaha'
+    description: 'Akumulasi tabungan bersih dari periode sebelumnya'
   },
 
-  // 4-XXXX: PENDAPATAN / REVENUE (Normal: Kredit)
+  // 4000 - PENDAPATAN (Normal: Kredit)
   {
-    code: '4-1100',
-    name: 'Pendapatan Gaji & Upah (Salary Income)',
+    code: '4101',
+    name: 'Gaji & Tunjangan Tetap',
     category: 'revenue',
-    subCategory: 'Pendapatan Utama',
+    subCategory: 'Pendapatan Aktif',
     normalBalance: 'credit',
-    description: 'Penghasilan tetap dari gaji bulanan atau komisi kerja'
+    description: 'Gaji pokok, tunjangan transport, tunjangan makan'
   },
   {
-    code: '4-1200',
-    name: 'Pendapatan Jasa & Freelance',
+    code: '4102',
+    name: 'Bonus, THR & Insentif',
     category: 'revenue',
-    subCategory: 'Pendapatan Utama',
+    subCategory: 'Pendapatan Aktif',
     normalBalance: 'credit',
-    description: 'Penghasilan dari proyek kreatif, coding, konsultasi'
+    description: 'Tunjangan Hari Raya, bonus tahunan, komisi'
   },
   {
-    code: '4-1300',
-    name: 'Pendapatan Investasi, Dividen & Bunga',
+    code: '4103',
+    name: 'Pendapatan Freelance / Sampingan',
+    category: 'revenue',
+    subCategory: 'Pendapatan Aktif',
+    normalBalance: 'credit',
+    description: 'Jasa konsultasi, proyek lepas, keuntungan dagang'
+  },
+  {
+    code: '4201',
+    name: 'Bunga Tabungan & Deposito',
+    category: 'revenue',
+    subCategory: 'Pendapatan Pasif',
+    normalBalance: 'credit',
+    description: 'Bagi hasil bank atau kupon SBN/obligasi'
+  },
+  {
+    code: '4202',
+    name: 'Dividen & Capital Gain',
+    category: 'revenue',
+    subCategory: 'Pendapatan Pasif',
+    normalBalance: 'credit',
+    description: 'Dividen saham atau keuntungan jual aset'
+  },
+  {
+    code: '4203',
+    name: 'Pendapatan Sewa',
+    category: 'revenue',
+    subCategory: 'Pendapatan Pasif',
+    normalBalance: 'credit',
+    description: 'Hasil menyewakan properti atau kendaraan'
+  },
+  {
+    code: '4301',
+    name: 'Hadiah, Hibah & Cashback',
     category: 'revenue',
     subCategory: 'Pendapatan Lain-lain',
     normalBalance: 'credit',
-    description: 'Bunga tabungan, dividen saham, imbal hasil reksadana'
-  },
-  {
-    code: '4-1400',
-    name: 'Pendapatan Penjualan & Usaha',
-    category: 'revenue',
-    subCategory: 'Pendapatan Utama',
-    normalBalance: 'credit',
-    description: 'Hasil penjualan produk fisik atau digital'
-  },
-  {
-    code: '4-1900',
-    name: 'Pendapatan Operasional Lainnya',
-    category: 'revenue',
-    subCategory: 'Pendapatan Lain-lain',
-    normalBalance: 'credit',
-    description: 'Cashback, reward, hadiah atau pendapatan tak terduga'
+    description: 'Angpao, hadiah uang tunai, cashback transaksi'
   },
 
-  // 5-XXXX: BEBAN & PENGELUARAN (Normal: Debit)
+  // 5000 - BEBAN (Normal: Debit)
   {
-    code: '5-1100',
-    name: 'Beban Makanan & Konsumsi (Food & Dining)',
+    code: '5101',
+    name: 'Makan & Minum Harian',
     category: 'expense',
-    subCategory: 'Beban Konsumsi',
+    subCategory: 'Beban Kebutuhan Pokok',
     normalBalance: 'debit',
-    description: 'Makan sehari-hari, kafe, pesan antar makanan'
+    description: 'Belanja bahan makanan, makan siang kerja, air galon'
   },
   {
-    code: '5-1200',
-    name: 'Beban Operasional Kerja & Software',
+    code: '5102',
+    name: 'Tempat Tinggal & Utilitas',
     category: 'expense',
-    subCategory: 'Beban Operasional',
+    subCategory: 'Beban Kebutuhan Pokok',
     normalBalance: 'debit',
-    description: 'Langganan AI tools, server, SaaS, domain, buku materi'
+    description: 'Sewa kos/kontrakan, listrik, air, internet, IPL'
   },
   {
-    code: '5-1300',
-    name: 'Beban Belanja Pokok & Sembako (Groceries)',
+    code: '5103',
+    name: 'Transportasi & BBM',
     category: 'expense',
-    subCategory: 'Beban Rumah Tangga',
+    subCategory: 'Beban Kebutuhan Pokok',
     normalBalance: 'debit',
-    description: 'Kebutuhan supermarket harian dan perlengkapan rumah'
+    description: 'Bensin, parkir, tol, ojek online, tiket KRL/bus'
   },
   {
-    code: '5-1400',
-    name: 'Beban Transportasi & Bahan Bakar',
+    code: '5104',
+    name: 'Komunikasi & Langganan Dasar',
     category: 'expense',
-    subCategory: 'Beban Operasional',
+    subCategory: 'Beban Kebutuhan Pokok',
     normalBalance: 'debit',
-    description: 'Bensin, tol, parkir, ojek online, tiket transportasi'
+    description: 'Pulsa, paket data seluler, penyimpanan cloud'
   },
   {
-    code: '5-1500',
-    name: 'Beban Utilitas, Listrik, Air & Internet',
+    code: '5105',
+    name: 'Kesehatan & Obat-obatan',
     category: 'expense',
-    subCategory: 'Beban Utilitas',
+    subCategory: 'Beban Kebutuhan Pokok',
     normalBalance: 'debit',
-    description: 'Token listrik PLN, tagihan air PDAM, WiFi internet'
+    description: 'Periksa dokter, obat, vitamin, perawatan gigi'
   },
   {
-    code: '5-1600',
-    name: 'Beban Gaya Hidup, Hiburan & Belanja Pribadi',
+    code: '5201',
+    name: 'Jajan, Kopi & Makan di Luar',
     category: 'expense',
-    subCategory: 'Beban Pribadi',
+    subCategory: 'Beban Gaya Hidup',
     normalBalance: 'debit',
-    description: 'Pakaian, gadget, nonton bioskop, hobi'
+    description: 'Nongkrong di kafe, restoran, pesan antar makanan'
   },
   {
-    code: '5-1700',
-    name: 'Beban Bunga & Biaya Finansial',
+    code: '5202',
+    name: 'Belanja Pribadi & Penampilan',
     category: 'expense',
-    subCategory: 'Beban Keuangan',
+    subCategory: 'Beban Gaya Hidup',
     normalBalance: 'debit',
-    description: 'Biaya admin transfer antarbank, bunga PayLater/kredit'
+    description: 'Pakaian, sepatu, skincare, potong rambut'
   },
   {
-    code: '5-1999',
-    name: 'Beban Operasional Lain-lain (Miscellaneous)',
+    code: '5203',
+    name: 'Hiburan, Hobi & Liburan',
     category: 'expense',
-    subCategory: 'Beban Umum',
+    subCategory: 'Beban Gaya Hidup',
     normalBalance: 'debit',
-    description: 'Pengeluaran rupa-rupa yang tidak termasuk kategori khusus'
+    description: 'Tiket bioskop, streaming, olahraga, traveling'
+  },
+  {
+    code: '5301',
+    name: 'Beban Bunga Pinjaman',
+    category: 'expense',
+    subCategory: 'Beban Keuangan & Pajak',
+    normalBalance: 'debit',
+    description: 'Porsi bunga pada cicilan KPR, kendaraan, kartu kredit'
+  },
+  {
+    code: '5302',
+    name: 'Biaya Admin Bank & Transfer',
+    category: 'expense',
+    subCategory: 'Beban Keuangan & Pajak',
+    normalBalance: 'debit',
+    description: 'Biaya admin bulanan rekening, biaya transfer, meterai'
+  },
+  {
+    code: '5303',
+    name: 'Pajak Pribadi',
+    category: 'expense',
+    subCategory: 'Beban Keuangan & Pajak',
+    normalBalance: 'debit',
+    description: 'PPh 21, PBB rumah, pajak kendaraan (PKB)'
+  },
+  {
+    code: '5304',
+    name: 'Premi Asuransi',
+    category: 'expense',
+    subCategory: 'Beban Keuangan & Pajak',
+    normalBalance: 'debit',
+    description: 'BPJS Kesehatan, asuransi jiwa, kesehatan swasta'
+  },
+  {
+    code: '5401',
+    name: 'Zakat, Infak, Sedekah & Donasi',
+    category: 'expense',
+    subCategory: 'Beban Sosial & Pendidikan',
+    normalBalance: 'debit',
+    description: 'Kewajiban amal, persepuluhan, sumbangan sosial'
+  },
+  {
+    code: '5402',
+    name: 'Hadiah & Acara Keluarga',
+    category: 'expense',
+    subCategory: 'Beban Sosial & Pendidikan',
+    normalBalance: 'debit',
+    description: 'Kado pernikahan, sumbangan hajatan, traktir keluarga'
+  },
+  {
+    code: '5403',
+    name: 'Pendidikan & Pengembangan Diri',
+    category: 'expense',
+    subCategory: 'Beban Sosial & Pendidikan',
+    normalBalance: 'debit',
+    description: 'Buku, kursus online, seminar, pelatihan'
   }
 ];
 
-// Helper: Get or dynamically map all COA accounts including all user FinancialAccounts
-export const getAllChartOfAccounts = (accounts: FinancialAccount[]): ChartOfAccount[] => {
-  const result = [...BASE_CHART_OF_ACCOUNTS];
+const LEGACY_COA_CODE_MAP: Record<string, string> = {
+  '1-1100': '1101',
+  '1-1201': '1102',
+  '1-1202': '1103',
+  '1-1299': '1102',
+  '1-1301': '1104',
+  '1-1302': '1104',
+  '1-1303': '1104',
+  '1-1399': '1104',
+  '1-1400': '1201',
+  '1-1500': '1201',
+  '2-1100': '2103',
+  '2-1200': '2102',
+  '2-1300': '2101',
+  '2-1400': '2203',
+  '3-1100': '3101',
+  '3-1200': '3201',
+  '3-1300': '3201',
+  '4-1100': '4101',
+  '4-1200': '4103',
+  '4-1300': '4201',
+  '4-1400': '4103',
+  '4-1900': '4301',
+  '5-1100': '5101',
+  '5-1200': '5104',
+  '5-1300': '5101',
+  '5-1400': '5103',
+  '5-1500': '5102',
+  '5-1600': '5202',
+  '5-1700': '5302',
+  '5-1999': '5202',
+};
 
-  accounts.forEach((acc, index) => {
-    // Check if an existing COA is already mapped to this account
-    const existing = result.find(c => c.linkedAccountId === acc.id || c.name.toLowerCase() === acc.name.toLowerCase());
-    if (existing) {
-      existing.linkedAccountId = acc.id;
-      return;
+export const normalizeCoaCode = (code?: string): string | undefined => {
+  if (!code) return undefined;
+  const trimmed = code.trim();
+  if (!trimmed) return undefined;
+  if (LEGACY_COA_CODE_MAP[trimmed]) return LEGACY_COA_CODE_MAP[trimmed];
+  if (trimmed.startsWith('1-11')) return '1101';
+  if (trimmed.startsWith('1-12')) return '1102';
+  if (trimmed.startsWith('1-13')) return '1104';
+  return trimmed;
+};
+
+export const inferLiabilityCoaCode = (creditorOrDesc: string): string => {
+  const s = creditorOrDesc.toLowerCase();
+  if (s.includes('kartu kredit') || s.includes('credit card') || /\bcc\b/.test(s)) return '2101';
+  if (s.includes('paylater') || s.includes('spaylater') || s.includes('gopay later') || s.includes('kredivo') || s.includes('indodana') || s.includes('akulaku')) return '2102';
+  if (s.includes('kpr') || s.includes('rumah') || s.includes('properti')) return '2201';
+  if (s.includes('kendaraan') || s.includes('mobil') || s.includes('motor') || s.includes('leasing')) return '2202';
+  if (s.includes('kta') || s.includes('multiguna') || s.includes('bank')) return '2203';
+  return '2103';
+};
+
+// Helper: Get all COA accounts including linked FinancialAccounts & user Custom/Edited COAs
+export const getAllChartOfAccounts = (
+  accounts: FinancialAccount[],
+  customCoaAccounts: ChartOfAccount[] = []
+): ChartOfAccount[] => {
+  const result: ChartOfAccount[] = BASE_CHART_OF_ACCOUNTS.map(c => ({ ...c }));
+
+  // Link real FinancialAccounts to standard asset COA codes (1101..1104 or acc.coaCode)
+  accounts.forEach((acc) => {
+    const normalizedAccCoa = normalizeCoaCode(acc.coaCode);
+    const preferredCode = normalizedAccCoa
+      || (acc.type === 'cash'
+        ? '1101'
+        : acc.type === 'ewallet'
+        ? '1104'
+        : (acc.name.toLowerCase().includes('tabung') || acc.name.toLowerCase().includes('saving') || acc.name.toLowerCase().includes('darurat'))
+        ? '1103'
+        : '1102');
+
+    const target = result.find(c => c.code === preferredCode);
+    if (target && !target.linkedAccountId) {
+      target.linkedAccountId = acc.id;
     }
+  });
 
-    // Determine code prefix
-    let code = '';
-    let subCategory = '';
-    if (acc.type === 'cash') {
-      code = index === 0 ? '1-1100' : `1-110${index}`;
-      subCategory = 'Kas & Setara Kas';
-    } else if (acc.type === 'bank') {
-      code = `1-12${String(index + 10).padStart(2, '0')}`;
-      subCategory = 'Kas di Bank';
+  // Merge user-added or user-edited COA definitions
+  customCoaAccounts.forEach(custom => {
+    const cleanCode = custom.code.trim();
+    if (!cleanCode || !custom.name.trim()) return;
+    const idx = result.findIndex(c => c.code === cleanCode);
+    if (idx >= 0) {
+      result[idx] = {
+        ...result[idx],
+        name: custom.name.trim(),
+        category: custom.category || result[idx].category,
+        subCategory: custom.subCategory.trim() || result[idx].subCategory,
+        normalBalance: custom.normalBalance || result[idx].normalBalance,
+        description: custom.description !== undefined ? custom.description : result[idx].description,
+        isCustom: true,
+      };
     } else {
-      code = `1-13${String(index + 10).padStart(2, '0')}`;
-      subCategory = 'Dompet Digital';
+      result.push({
+        code: cleanCode,
+        name: custom.name.trim(),
+        category: custom.category,
+        subCategory: custom.subCategory.trim() || 'Kustom',
+        normalBalance: custom.normalBalance,
+        description: custom.description,
+        isCustom: true,
+      });
     }
-
-    // Make sure code is unique
-    let finalCode = code;
-    let counter = 1;
-    while (result.some(c => c.code === finalCode)) {
-      finalCode = `${code.substring(0, 4)}${counter++}`;
-    }
-
-    result.push({
-      code: finalCode,
-      name: `${acc.name} (${acc.type.toUpperCase()})`,
-      category: 'asset',
-      subCategory,
-      normalBalance: 'debit',
-      description: `Rekening riil: ${acc.name} ${acc.accountNumber ? `[${acc.accountNumber}]` : ''}`,
-      linkedAccountId: acc.id,
-      isCustom: true
-    });
   });
 
   return result.sort((a, b) => a.code.localeCompare(b.code));
 };
 
-// Helper: Get COA Account for a specific FinancialAccount
-export const getCoaForFinancialAccount = (acc: FinancialAccount, allCoa: ChartOfAccount[]): ChartOfAccount => {
-  const matched = allCoa.find(c => c.linkedAccountId === acc.id) ||
-                  allCoa.find(c => c.name.toLowerCase().includes(acc.name.toLowerCase())) ||
-                  allCoa.find(c => acc.type === 'cash' ? c.code === '1-1100' : acc.type === 'bank' ? c.code === '1-1201' : c.code === '1-1301');
-  
-  if (matched) return matched;
-
-  return {
-    code: acc.type === 'cash' ? '1-1100' : acc.type === 'bank' ? '1-1201' : '1-1301',
-    name: acc.name,
-    category: 'asset',
-    subCategory: acc.type === 'cash' ? 'Kas & Setara Kas' : acc.type === 'bank' ? 'Kas di Bank' : 'Dompet Digital',
-    normalBalance: 'debit',
-    linkedAccountId: acc.id
-  };
+// Helper: Resolve ChartOfAccount by code with legacy fallback
+const findCoaByCodeOrFallback = (
+  allCoa: ChartOfAccount[],
+  code?: string,
+  fallbackCode?: string
+): ChartOfAccount => {
+  if (code) {
+    const exact = allCoa.find(c => c.code === code);
+    if (exact) return exact;
+    const mapped = normalizeCoaCode(code);
+    if (mapped) {
+      const normalizedMatch = allCoa.find(c => c.code === mapped);
+      if (normalizedMatch) return normalizedMatch;
+    }
+  }
+  if (fallbackCode) {
+    const fb = allCoa.find(c => c.code === fallbackCode);
+    if (fb) return fb;
+  }
+  return allCoa[0];
 };
 
-// Helper: Map Transaction Category to Standard COA
+// Helper: Get COA Account for a specific FinancialAccount
+export const getCoaForFinancialAccount = (acc: FinancialAccount, allCoa: ChartOfAccount[]): ChartOfAccount => {
+  if (acc.coaCode) {
+    const byExplicit = findCoaByCodeOrFallback(allCoa, acc.coaCode);
+    if (byExplicit && (byExplicit.code === acc.coaCode || byExplicit.code === normalizeCoaCode(acc.coaCode))) {
+      return byExplicit;
+    }
+  }
+
+  const byLinked = allCoa.find(c => c.linkedAccountId === acc.id);
+  if (byLinked && !acc.coaCode) {
+    const expectedPrefix = acc.type === 'cash' ? '1101' : acc.type === 'ewallet' ? '1104' : '110';
+    if (byLinked.code.startsWith(expectedPrefix)) return byLinked;
+  }
+
+  if (acc.type === 'cash') {
+    return findCoaByCodeOrFallback(allCoa, '1101');
+  }
+  if (acc.type === 'ewallet') {
+    return findCoaByCodeOrFallback(allCoa, '1104');
+  }
+  const lower = acc.name.toLowerCase();
+  if (lower.includes('tabung') || lower.includes('saving') || lower.includes('darurat')) {
+    return findCoaByCodeOrFallback(allCoa, '1103');
+  }
+  return findCoaByCodeOrFallback(allCoa, '1102');
+};
+
+// Helper: Map Transaction Category to Standard COA (Supports both new Indonesian & legacy categories)
 export const getCoaForCategory = (category: string, type: 'income' | 'expense', allCoa: ChartOfAccount[]): ChartOfAccount => {
   const cat = category.toLowerCase();
 
   if (type === 'income') {
-    if (cat.includes('gaji') || cat.includes('salary')) {
-      return allCoa.find(c => c.code === '4-1100') || allCoa[0];
+    if (cat.includes('gaji') || cat.includes('salary') || cat.includes('tunjangan')) {
+      return findCoaByCodeOrFallback(allCoa, '4101');
     }
-    if (cat.includes('freelance') || cat.includes('jasa') || cat.includes('proyek')) {
-      return allCoa.find(c => c.code === '4-1200') || allCoa[0];
+    if (cat.includes('bonus') || cat.includes('thr') || cat.includes('insentif') || cat.includes('komisi')) {
+      return findCoaByCodeOrFallback(allCoa, '4102');
     }
-    if (cat.includes('invest') || cat.includes('bunga') || cat.includes('dividen')) {
-      return allCoa.find(c => c.code === '4-1300') || allCoa[0];
+    if (cat.includes('freelance') || cat.includes('sampingan') || cat.includes('jasa') || cat.includes('proyek') || cat.includes('reimburse') || cat.includes('penjualan') || cat.includes('usaha')) {
+      return findCoaByCodeOrFallback(allCoa, '4103');
+    }
+    if (cat.includes('bunga') || cat.includes('deposito') || cat.includes('tabungan') || cat.includes('obligasi') || cat.includes('kupon')) {
+      return findCoaByCodeOrFallback(allCoa, '4201');
+    }
+    if (cat.includes('dividen') || cat.includes('capital gain') || cat.includes('saham') || cat.includes('invest')) {
+      return findCoaByCodeOrFallback(allCoa, '4202');
+    }
+    if (cat.includes('sewa')) {
+      return findCoaByCodeOrFallback(allCoa, '4203');
     }
     if (cat.includes('piutang') || cat.includes('pelunasan')) {
-      return allCoa.find(c => c.code === '1-1400') || allCoa[0];
+      return findCoaByCodeOrFallback(allCoa, '1201');
+    }
+    if (cat.includes('saldo awal')) {
+      return findCoaByCodeOrFallback(allCoa, '3101');
     }
     if (cat.includes('penyesuaian') || cat.includes('opname')) {
-      return allCoa.find(c => c.code === '3-1200') || allCoa[0];
+      return findCoaByCodeOrFallback(allCoa, '3201');
     }
-    return allCoa.find(c => c.code === '4-1900') || allCoa[0];
+    return findCoaByCodeOrFallback(allCoa, '4301');
   } else {
     // Expense
-    if (cat.includes('makan') || cat.includes('food') || cat.includes('dining')) {
-      return allCoa.find(c => c.code === '5-1100') || allCoa[0];
+    if (cat.includes('jajan') || cat.includes('kopi') || cat.includes('kafe') || cat.includes('makan di luar') || cat.includes('nongkrong')) {
+      return findCoaByCodeOrFallback(allCoa, '5201');
     }
-    if (cat.includes('software') || cat.includes('work') || cat.includes('kerja')) {
-      return allCoa.find(c => c.code === '5-1200') || allCoa[0];
+    if (cat.includes('makan') || cat.includes('food') || cat.includes('dining') || cat.includes('groceries') || cat.includes('sembako') || cat.includes('minum')) {
+      return findCoaByCodeOrFallback(allCoa, '5101');
     }
-    if (cat.includes('groceries') || cat.includes('belanja') || cat.includes('sembako')) {
-      return allCoa.find(c => c.code === '5-1300') || allCoa[0];
+    if (cat.includes('tempat tinggal') || cat.includes('kos') || cat.includes('kontrakan') || cat.includes('utilities') || cat.includes('listrik') || cat.includes('internet') || cat.includes('air') || cat.includes('ipl')) {
+      return findCoaByCodeOrFallback(allCoa, '5102');
     }
-    if (cat.includes('transport') || cat.includes('bensin') || cat.includes('ojek')) {
-      return allCoa.find(c => c.code === '5-1400') || allCoa[0];
+    if (cat.includes('transport') || cat.includes('bensin') || cat.includes('bbm') || cat.includes('ojek') || cat.includes('parkir') || cat.includes('tol')) {
+      return findCoaByCodeOrFallback(allCoa, '5103');
     }
-    if (cat.includes('utilities') || cat.includes('listrik') || cat.includes('internet') || cat.includes('air')) {
-      return allCoa.find(c => c.code === '5-1500') || allCoa[0];
+    if (cat.includes('komunikasi') || cat.includes('pulsa') || cat.includes('paket data') || cat.includes('langganan') || cat.includes('software') || cat.includes('work') || cat.includes('kerja')) {
+      return findCoaByCodeOrFallback(allCoa, '5104');
     }
-    if (cat.includes('shopping') || cat.includes('lifestyle') || cat.includes('gaya')) {
-      return allCoa.find(c => c.code === '5-1600') || allCoa[0];
+    if (cat.includes('kesehatan') || cat.includes('obat') || cat.includes('dokter') || cat.includes('vitamin')) {
+      return findCoaByCodeOrFallback(allCoa, '5105');
     }
-    if (cat.includes('cicilan') || cat.includes('hutang') || cat.includes('debt') || cat.includes('paylater')) {
-      return allCoa.find(c => c.code === '2-1200') || allCoa[0];
+    if (cat.includes('shopping') || cat.includes('belanja') || cat.includes('pakaian') || cat.includes('penampilan') || cat.includes('skincare')) {
+      return findCoaByCodeOrFallback(allCoa, '5202');
     }
-    if (cat.includes('pinjaman') || cat.includes('piutang')) {
-      return allCoa.find(c => c.code === '1-1400') || allCoa[0];
+    if (cat.includes('hiburan') || cat.includes('hobi') || cat.includes('liburan') || cat.includes('entertainment') || cat.includes('lifestyle') || cat.includes('gaya')) {
+      return findCoaByCodeOrFallback(allCoa, '5203');
     }
-    if (cat.includes('admin') || cat.includes('bunga') || cat.includes('biaya')) {
-      return allCoa.find(c => c.code === '5-1700') || allCoa[0];
+    if (cat.includes('bunga pinjaman')) {
+      return findCoaByCodeOrFallback(allCoa, '5301');
+    }
+    if (cat.includes('admin') || cat.includes('biaya') || cat.includes('bunga')) {
+      return findCoaByCodeOrFallback(allCoa, '5302');
+    }
+    if (cat.includes('pajak') || cat.includes('pph') || cat.includes('pbb') || cat.includes('pkb')) {
+      return findCoaByCodeOrFallback(allCoa, '5303');
+    }
+    if (cat.includes('asuransi') || cat.includes('bpjs') || cat.includes('premi')) {
+      return findCoaByCodeOrFallback(allCoa, '5304');
+    }
+    if (cat.includes('zakat') || cat.includes('infak') || cat.includes('sedekah') || cat.includes('donasi')) {
+      return findCoaByCodeOrFallback(allCoa, '5401');
+    }
+    if (cat.includes('hadiah') || cat.includes('acara keluarga') || cat.includes('kado')) {
+      return findCoaByCodeOrFallback(allCoa, '5402');
+    }
+    if (cat.includes('pendidikan') || cat.includes('buku') || cat.includes('kursus') || cat.includes('seminar') || cat.includes('pelatihan')) {
+      return findCoaByCodeOrFallback(allCoa, '5403');
+    }
+    if (cat.includes('kartu kredit')) {
+      return findCoaByCodeOrFallback(allCoa, '2101');
+    }
+    if (cat.includes('paylater')) {
+      return findCoaByCodeOrFallback(allCoa, '2102');
+    }
+    if (cat.includes('cicilan') || cat.includes('hutang') || cat.includes('utang') || cat.includes('debt')) {
+      return findCoaByCodeOrFallback(allCoa, '2103');
+    }
+    if (cat.includes('pinjaman') || cat.includes('piutang') || cat.includes('talangan')) {
+      return findCoaByCodeOrFallback(allCoa, '1201');
     }
     if (cat.includes('penyesuaian') || cat.includes('opname')) {
-      return allCoa.find(c => c.code === '3-1200') || allCoa[0];
+      return findCoaByCodeOrFallback(allCoa, '3201');
     }
-    return allCoa.find(c => c.code === '5-1999') || allCoa[0];
+    return findCoaByCodeOrFallback(allCoa, '5202');
   }
+};
+
+// Helper: Resolve effective contra COA for any transaction consistently across Journal, Ledger, and UI
+export const getEffectiveContraCoaForTransaction = (
+  tx: FinanceTransaction,
+  allCoa: ChartOfAccount[],
+  myDebts: MyDebtLiability[] = []
+): ChartOfAccount => {
+  if (tx.coaCode) {
+    const exactOrMapped = findCoaByCodeOrFallback(allCoa, tx.coaCode);
+    const normalized = normalizeCoaCode(tx.coaCode);
+    if (exactOrMapped && (exactOrMapped.code === tx.coaCode || exactOrMapped.code === normalized)) {
+      return exactOrMapped;
+    }
+    const inferredCategory: CoaClass = tx.coaCode.startsWith('1')
+      ? 'asset'
+      : tx.coaCode.startsWith('2')
+      ? 'liability'
+      : tx.coaCode.startsWith('3')
+      ? 'equity'
+      : tx.coaCode.startsWith('4')
+      ? 'revenue'
+      : 'expense';
+    return {
+      code: tx.coaCode,
+      name: tx.coaName || 'Akun COA Kustom',
+      category: inferredCategory,
+      subCategory: 'Kustom',
+      normalBalance: (inferredCategory === 'asset' || inferredCategory === 'expense') ? 'debit' : 'credit'
+    };
+  }
+
+  if (tx.type === 'income') {
+    return getCoaForCategory(tx.category, 'income', allCoa);
+  }
+
+  if (tx.relatedDebtId) {
+    const linkedDebt = myDebts.find(d => d.id === tx.relatedDebtId);
+    if (linkedDebt) {
+      const code = inferLiabilityCoaCode(`${linkedDebt.creditorName} ${linkedDebt.description}`);
+      return findCoaByCodeOrFallback(allCoa, code, '2103');
+    }
+  }
+
+  return getCoaForCategory(tx.category, 'expense', allCoa);
 };
 
 // =========================================================================
@@ -413,22 +690,17 @@ export const generateStandardJournalEntries = (
   transactions: FinanceTransaction[],
   accounts: FinancialAccount[],
   myDebts: MyDebtLiability[],
-  debts: DebtReceivable[]
+  debts: DebtReceivable[],
+  customCoaAccounts: ChartOfAccount[] = []
 ): JournalEntry[] => {
-  const allCoa = getAllChartOfAccounts(accounts);
+  const allCoa = getAllChartOfAccounts(accounts, customCoaAccounts);
   const entries: JournalEntry[] = [];
 
-  // 1. Initial Balances Journal Entries (Debit: Asset Bank/Cash, Credit: 3-1100 Modal Awal Pemilik)
+  // 1. Initial Balances Journal Entries (Debit: Asset Kas/Bank/E-Wallet, Credit: 3101 Saldo Awal Kekayaan Bersih)
   accounts.forEach((acc, index) => {
     if (acc.initialBalance > 0) {
       const assetCoa = getCoaForFinancialAccount(acc, allCoa);
-      const equityCoa = allCoa.find(c => c.code === '3-1100') || {
-        code: '3-1100',
-        name: 'Modal Awal Pemilik (Owner\'s Equity)',
-        category: 'equity' as CoaClass,
-        subCategory: 'Modal Pemilik',
-        normalBalance: 'credit' as const
-      };
+      const equityCoa = findCoaByCodeOrFallback(allCoa, '3101');
 
       entries.push({
         id: `jnl-init-${acc.id}`,
@@ -489,42 +761,35 @@ export const generateStandardJournalEntries = (
     let refPrefix = isVoidContra ? 'VOID' : 'TXN';
 
     if (isVoidContra && tx.debitAccountCode && tx.creditAccountCode) {
-      entrySourceType = 'audit_adjustment';
-      debitCoa = allCoa.find(c => c.code === tx.debitAccountCode) || {
-        code: tx.debitAccountCode,
-        name: tx.debitAccountName || tx.debitAccountCode,
-        category: tx.debitAccountCode.startsWith('1') ? 'asset' : tx.debitAccountCode.startsWith('2') ? 'liability' : tx.debitAccountCode.startsWith('3') ? 'equity' : tx.debitAccountCode.startsWith('4') ? 'revenue' : 'expense',
-        subCategory: 'Jurnal Lawan Void',
-        normalBalance: 'debit'
-      };
-      creditCoa = allCoa.find(c => c.code === tx.creditAccountCode) || {
-        code: tx.creditAccountCode,
-        name: tx.creditAccountName || tx.creditAccountCode,
-        category: tx.creditAccountCode.startsWith('1') ? 'asset' : tx.creditAccountCode.startsWith('2') ? 'liability' : tx.creditAccountCode.startsWith('3') ? 'equity' : tx.creditAccountCode.startsWith('4') ? 'revenue' : 'expense',
-        subCategory: 'Jurnal Lawan Void',
-        normalBalance: 'credit'
-      };
+      entrySourceType = tx.isAdjustment ? 'audit_adjustment' : 'transaction';
+      debitCoa = findCoaByCodeOrFallback(allCoa, tx.debitAccountCode);
+      if (debitCoa.code !== tx.debitAccountCode && debitCoa.code !== normalizeCoaCode(tx.debitAccountCode)) {
+        const inferredCat: CoaClass = tx.debitAccountCode.startsWith('1') ? 'asset' : tx.debitAccountCode.startsWith('2') ? 'liability' : tx.debitAccountCode.startsWith('3') ? 'equity' : tx.debitAccountCode.startsWith('4') ? 'revenue' : 'expense';
+        debitCoa = {
+          code: tx.debitAccountCode,
+          name: tx.debitAccountName || tx.debitAccountCode,
+          category: inferredCat,
+          subCategory: 'Jurnal Lawan Void',
+          normalBalance: 'debit'
+        };
+      }
+      creditCoa = findCoaByCodeOrFallback(allCoa, tx.creditAccountCode);
+      if (creditCoa.code !== tx.creditAccountCode && creditCoa.code !== normalizeCoaCode(tx.creditAccountCode)) {
+        const inferredCat: CoaClass = tx.creditAccountCode.startsWith('1') ? 'asset' : tx.creditAccountCode.startsWith('2') ? 'liability' : tx.creditAccountCode.startsWith('3') ? 'equity' : tx.creditAccountCode.startsWith('4') ? 'revenue' : 'expense';
+        creditCoa = {
+          code: tx.creditAccountCode,
+          name: tx.creditAccountName || tx.creditAccountCode,
+          category: inferredCat,
+          subCategory: 'Jurnal Lawan Void',
+          normalBalance: 'credit'
+        };
+      }
     } else if (tx.coaCode) {
-      // Explicit COA Adjustment selected from Akun & Saldo Awal
-      entrySourceType = 'audit_adjustment';
-      refPrefix = isVoidContra ? 'VOID' : 'ADJ';
-      const inferredCategory: CoaClass = tx.coaCode.startsWith('1')
-        ? 'asset'
-        : tx.coaCode.startsWith('2')
-        ? 'liability'
-        : tx.coaCode.startsWith('3')
-        ? 'equity'
-        : tx.coaCode.startsWith('4')
-        ? 'revenue'
-        : 'expense';
-
-      const contraCoa = allCoa.find(c => c.code === tx.coaCode) || {
-        code: tx.coaCode,
-        name: tx.coaName || 'Penyesuaian COA',
-        category: inferredCategory,
-        subCategory: 'Penyesuaian COA',
-        normalBalance: (inferredCategory === 'asset' || inferredCategory === 'expense') ? 'debit' as const : 'credit' as const
-      };
+      // Explicit COA Adjustment or user-assigned COA on transaction
+      const isAdj = Boolean(tx.isAdjustment || tx.category === 'Penyesuaian COA');
+      entrySourceType = isAdj ? 'audit_adjustment' : 'transaction';
+      refPrefix = isVoidContra ? 'VOID' : isAdj ? 'ADJ' : 'TXN';
+      const contraCoa = getEffectiveContraCoaForTransaction(tx, allCoa, myDebts);
 
       if (tx.type === 'income') {
         debitCoa = assetCoa;
@@ -545,41 +810,21 @@ export const generateStandardJournalEntries = (
     } else if (isVoidContra) {
       // Reversal of a regular income/expense/debt transaction: mirror exact original COA
       const origType: 'income' | 'expense' = tx.type === 'income' ? 'expense' : 'income';
-      let origContraCoa: ChartOfAccount;
+      const origContraCoa = getEffectiveContraCoaForTransaction({ ...tx, type: origType }, allCoa, myDebts);
       if (origType === 'income') {
-        origContraCoa = getCoaForCategory(tx.category, 'income', allCoa);
-        // Original was Debit Asset, Credit Revenue -> Contra (expense) Debits Revenue, Credits Asset
         debitCoa = origContraCoa;
         creditCoa = assetCoa;
       } else {
-        if (tx.relatedDebtId || tx.category.toLowerCase().includes('hutang') || tx.category.toLowerCase().includes('cicilan')) {
-          origContraCoa = allCoa.find(c => c.code === '2-1200') || allCoa.find(c => c.code === '2-1100') || allCoa[0];
-        } else if (tx.category.toLowerCase().includes('piutang') || tx.category.toLowerCase().includes('pinjaman')) {
-          origContraCoa = allCoa.find(c => c.code === '1-1400') || allCoa[0];
-        } else if (tx.category.toLowerCase().includes('admin') || tx.category.toLowerCase().includes('biaya')) {
-          origContraCoa = allCoa.find(c => c.code === '5-1700') || allCoa[0];
-        } else {
-          origContraCoa = getCoaForCategory(tx.category, 'expense', allCoa);
-        }
-        // Original was Debit Expense, Credit Asset -> Contra (income) Debits Asset, Credits Expense
         debitCoa = assetCoa;
         creditCoa = origContraCoa;
       }
     } else if (tx.type === 'income') {
       // Income: Debit Kas/Bank (Asset), Credit Pendapatan/Revenue
       debitCoa = assetCoa;
-      creditCoa = getCoaForCategory(tx.category, 'income', allCoa);
+      creditCoa = getEffectiveContraCoaForTransaction(tx, allCoa, myDebts);
     } else {
-      // Expense:
-      if (tx.relatedDebtId || tx.category.toLowerCase().includes('hutang') || tx.category.toLowerCase().includes('cicilan')) {
-        debitCoa = allCoa.find(c => c.code === '2-1200') || allCoa.find(c => c.code === '2-1100') || allCoa[0];
-      } else if (tx.category.toLowerCase().includes('piutang') || tx.category.toLowerCase().includes('pinjaman')) {
-        debitCoa = allCoa.find(c => c.code === '1-1400') || allCoa[0];
-      } else if (tx.category.toLowerCase().includes('admin') || tx.category.toLowerCase().includes('biaya')) {
-        debitCoa = allCoa.find(c => c.code === '5-1700') || allCoa[0];
-      } else {
-        debitCoa = getCoaForCategory(tx.category, 'expense', allCoa);
-      }
+      // Expense / Liability Payment / Receivable Loan
+      debitCoa = getEffectiveContraCoaForTransaction(tx, allCoa, myDebts);
       creditCoa = assetCoa;
     }
 

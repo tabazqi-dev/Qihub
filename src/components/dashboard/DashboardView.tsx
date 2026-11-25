@@ -279,6 +279,19 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('converter')}
+            className="flex items-center gap-3 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all text-left group cursor-pointer border border-neutral-200/60 dark:border-neutral-700/60"
+          >
+            <div className="w-9 h-9 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <ArrowLeftRight className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">Image Converter</p>
+              <p className="text-[11px] text-neutral-500 truncate">PNG ⇄ JPG & WebP</p>
+            </div>
+          </button>
+
+          <button
             onClick={() => setActiveTab('finance')}
             className="flex items-center gap-3 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all text-left group cursor-pointer border border-neutral-200/60 dark:border-neutral-700/60"
           >

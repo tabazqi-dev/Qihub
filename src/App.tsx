@@ -17,6 +17,7 @@ import { TodoCalendarView } from './components/todos/TodoCalendarView';
 import { FinanceTrackerView } from './components/finance/FinanceTrackerView';
 import { ReimburseView } from './components/reimburse/ReimburseView';
 import { RemoveBgView } from './components/removebg/RemoveBgView';
+import { ImageConverterView } from './components/converter/ImageConverterView';
 import { NotesKnowledgeView } from './components/notes/NotesKnowledgeView';
 import { PdfToolsView } from './components/pdf/PdfToolsView';
 import { BarcodeQrView } from './components/barcode/BarcodeQrView';
@@ -51,6 +52,8 @@ const MainShell: React.FC = () => {
         return <ReimburseView />;
       case 'removebg':
         return <RemoveBgView />;
+      case 'converter':
+        return <ImageConverterView />;
       case 'notes':
         return <NotesKnowledgeView />;
       case 'pdftools':

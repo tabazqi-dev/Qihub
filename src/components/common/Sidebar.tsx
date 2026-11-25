@@ -20,7 +20,8 @@ import {
   ClipboardList,
   Cloud,
   CloudOff,
-  LogOut
+  LogOut,
+  ArrowLeftRight
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -59,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'reimburse', label: 'Reimburse Proyek', icon: Receipt, badge: pendingReimburseCount > 0 ? pendingReimburseCount : undefined },
     { id: 'logbook', label: 'Logbook Kerja', icon: ClipboardList },
     { id: 'removebg', label: 'Remove Background', icon: Scissors },
+    { id: 'converter', label: 'Image Converter', icon: ArrowLeftRight },
     { id: 'todos', label: 'Todo & Kalender', icon: CalendarCheck, badge: pendingTodosCount > 0 ? pendingTodosCount : undefined },
     { id: 'notes', label: 'Catatan & Ide', icon: FileText },
     { id: 'pdftools', label: 'PDF Utilities', icon: FileType },

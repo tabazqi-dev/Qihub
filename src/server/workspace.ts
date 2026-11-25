@@ -97,6 +97,47 @@ function getBudgetDocId(category: string): string {
   return slug ? `bgt-${slug}`.slice(0, 120) : `bgt-${Date.now()}`;
 }
 
+interface SanitizedCustomCoa {
+  code: string;
+  name: string;
+  category: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  subCategory: string;
+  normalBalance: 'debit' | 'credit';
+  description?: string;
+  linkedAccountId?: string;
+  isCustom?: boolean;
+}
+
+function sanitizeCustomCoaList(val: unknown): SanitizedCustomCoa[] {
+  if (!Array.isArray(val)) return [];
+  const validClasses = new Set(['asset', 'liability', 'equity', 'revenue', 'expense']);
+  const byCode = new Map<string, SanitizedCustomCoa>();
+  for (const item of val.slice(0, 300)) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    const code = sanitizeStr(r.code, 32).trim();
+    const name = sanitizeStr(r.name, 160).trim();
+    if (!code || !name) continue;
+    const category = validClasses.has(String(r.category))
+      ? (r.category as SanitizedCustomCoa['category'])
+      : 'expense';
+    const normalBalance = r.normalBalance === 'debit' || r.normalBalance === 'credit'
+      ? r.normalBalance
+      : (category === 'asset' || category === 'expense' ? 'debit' : 'credit');
+    byCode.set(code, {
+      code,
+      name,
+      category,
+      subCategory: sanitizeStr(r.subCategory, 80, 'Lainnya').trim() || 'Lainnya',
+      normalBalance,
+      description: sanitizeOptStr(r.description, 400) ?? undefined,
+      linkedAccountId: sanitizeOptStr(r.linkedAccountId, 128) ?? undefined,
+      isCustom: r.isCustom === undefined ? true : Boolean(r.isCustom),
+    });
+  }
+  return Array.from(byCode.values());
+}
+
 const requireDatabase = async (_req: AuthRequest, res: Response, next: NextFunction) => {
   if (!isDatabaseConfigured()) {
     return res.status(503).json({
@@ -108,6 +149,13 @@ const requireDatabase = async (_req: AuthRequest, res: Response, next: NextFunct
     await ensurePostgresSchema();
     return next();
   } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'DATABASE_SCHEMA_PERMISSION_DENIED') {
+      return res.status(503).json({
+        error: 'DATABASE_NOT_CONFIGURED',
+        message: 'Akun database PostgreSQL belum memiliki izin CREATE/akses tabel Q\'Hub di schema public.',
+      });
+    }
     console.error('Database bootstrap failed:', err instanceof Error ? err.message : err);
     return res.status(500).json({ error: 'DATABASE_INIT_FAILED' });
   }
@@ -117,6 +165,7 @@ async function ensureUserRecord(uid: string, email?: string, name?: string) {
   const db = getDb();
   const safeEmail = (email || 'user@qhub.app').slice(0, 254);
   const safeName = (name || 'Pengguna QHub').slice(0, 120);
+  const isGoogle = !uid.startsWith('local-') && !safeEmail.endsWith('@qhub.local');
 
   await db
     .insert(qhubUsers)
@@ -124,14 +173,14 @@ async function ensureUserRecord(uid: string, email?: string, name?: string) {
       uid,
       email: safeEmail,
       displayName: safeName,
+      googleUid: isGoogle ? uid : null,
+      googleEmail: isGoogle ? safeEmail : null,
       createdAt: new Date(),
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: qhubUsers.uid,
       set: {
-        email: safeEmail,
-        displayName: safeName,
         updatedAt: new Date(),
       },
     });
@@ -197,6 +246,10 @@ workspaceRouter.get('/branding', async (_req, res) => {
       appLogoUrl: initialLogo,
     });
   } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'DATABASE_SCHEMA_PERMISSION_DENIED') {
+      return res.json({ appName: "Q'Hub", appLogoUrl: null });
+    }
     console.error('Failed to load global branding:', err instanceof Error ? err.message : err);
     return res.json({ appName: "Q'Hub", appLogoUrl: null });
   }
@@ -326,6 +379,7 @@ workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: Auth
           ? {
               theme: pref.theme === 'light' ? 'light' : 'dark',
               noteCategories: Array.isArray(pref.noteCategories) ? pref.noteCategories : [],
+              customCoa: Array.isArray(pref.customCoa) ? pref.customCoa : [],
               initialized: pref.initialized,
             }
           : null,
@@ -399,6 +453,7 @@ workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: Auth
           status: md.status,
           sourceTransactionId: md.sourceTransactionId || undefined,
           sourceAccountId: md.sourceAccountId || undefined,
+          addToAccount: md.addToAccount ?? undefined,
           category: md.category || undefined,
           notes: md.notes || undefined,
         })),
@@ -550,6 +605,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
           userId: uid,
           theme: ws.theme === 'light' ? 'light' : 'dark',
           noteCategories: sanitizeStrArray(ws.noteCategories, 50, 80),
+          customCoa: sanitizeCustomCoaList(ws.customCoa),
           initialized: true,
           updatedAt: new Date(),
         })
@@ -558,6 +614,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
           set: {
             theme: ws.theme === 'light' ? 'light' : 'dark',
             noteCategories: sanitizeStrArray(ws.noteCategories, 50, 80),
+            customCoa: sanitizeCustomCoaList(ws.customCoa),
             initialized: true,
             updatedAt: new Date(),
           },
@@ -682,6 +739,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
           status: ['unpaid', 'partial', 'paid'].includes(md.status) ? md.status : 'unpaid',
           sourceTransactionId: sanitizeOptStr(md.sourceTransactionId, 128),
           sourceAccountId: sanitizeOptStr(md.sourceAccountId, 128),
+          addToAccount: typeof md.addToAccount === 'boolean' ? md.addToAccount : null,
           category: sanitizeOptStr(md.category, 80),
           notes: sanitizeOptStr(md.notes, 1000),
           updatedAt: new Date(),
@@ -921,17 +979,19 @@ workspaceRouter.put('/workspace/preferences', requireAuth, requireDatabase, asyn
 
     const theme = p.theme !== undefined ? (p.theme === 'light' ? 'light' : 'dark') : (cur?.theme || 'dark');
     const noteCategories = p.noteCategories !== undefined ? sanitizeStrArray(p.noteCategories, 50, 80) : (cur?.noteCategories || []);
+    const customCoa = p.customCoa !== undefined ? sanitizeCustomCoaList(p.customCoa) : (cur?.customCoa || []);
     const initialized = p.initialized !== undefined ? Boolean(p.initialized) : (cur?.initialized ?? true);
 
     await db.insert(qhubPreferences).values({
       userId: uid,
       theme,
       noteCategories,
+      customCoa,
       initialized,
       updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: qhubPreferences.userId,
-      set: { theme, noteCategories, initialized, updatedAt: new Date() },
+      set: { theme, noteCategories, customCoa, initialized, updatedAt: new Date() },
     });
     return res.json({ success: true });
   } catch (err) {
@@ -1091,6 +1151,7 @@ workspaceRouter.post('/workspace/:collection', requireAuth, requireDatabase, asy
           status: ['unpaid', 'partial', 'paid'].includes(d.status) ? d.status : 'unpaid',
           sourceTransactionId: sanitizeOptStr(d.sourceTransactionId, 128),
           sourceAccountId: sanitizeOptStr(d.sourceAccountId, 128),
+          addToAccount: typeof d.addToAccount === 'boolean' ? d.addToAccount : null,
           category: sanitizeOptStr(d.category, 80),
           notes: sanitizeOptStr(d.notes, 1000),
           updatedAt: new Date(),
@@ -1305,6 +1366,7 @@ workspaceRouter.patch('/workspace/:collection/:id', requireAuth, requireDatabase
       }
       case 'transactions': {
         const patch: Record<string, unknown> = { updatedAt: new Date() };
+        if (d.type !== undefined && (d.type === 'income' || d.type === 'expense')) patch.type = d.type;
         if (d.title !== undefined) patch.title = sanitizeStr(d.title, 200, 'Transaksi');
         if (d.amount !== undefined) patch.amount = sanitizeNum(d.amount, 0, 0);
         if (d.category !== undefined) patch.category = sanitizeStr(d.category, 80, 'Lainnya');
@@ -1314,6 +1376,11 @@ workspaceRouter.patch('/workspace/:collection/:id', requireAuth, requireDatabase
         if (d.accountName !== undefined) patch.accountName = sanitizeOptStr(d.accountName, 120);
         if (d.accountId !== undefined) patch.accountId = sanitizeOptStr(d.accountId, 128);
         if (d.notes !== undefined) patch.notes = sanitizeOptStr(d.notes, 1000);
+        if (d.debitAccountCode !== undefined) patch.debitAccountCode = sanitizeOptStr(d.debitAccountCode, 32);
+        if (d.debitAccountName !== undefined) patch.debitAccountName = sanitizeOptStr(d.debitAccountName, 160);
+        if (d.creditAccountCode !== undefined) patch.creditAccountCode = sanitizeOptStr(d.creditAccountCode, 32);
+        if (d.creditAccountName !== undefined) patch.creditAccountName = sanitizeOptStr(d.creditAccountName, 160);
+        if (d.isAdjustment !== undefined) patch.isAdjustment = Boolean(d.isAdjustment);
         if (d.coaCode !== undefined) patch.coaCode = sanitizeOptStr(d.coaCode, 32);
         if (d.coaName !== undefined) patch.coaName = sanitizeOptStr(d.coaName, 160);
         if (d.isVoided !== undefined) patch.isVoided = Boolean(d.isVoided);
@@ -1346,6 +1413,8 @@ workspaceRouter.patch('/workspace/:collection/:id', requireAuth, requireDatabase
         if (d.amountPaid !== undefined) patch.amountPaid = sanitizeNum(d.amountPaid, 0, 0);
         if (d.dueDate !== undefined) patch.dueDate = sanitizeDate(d.dueDate);
         if (d.status !== undefined && ['unpaid', 'partial', 'paid'].includes(d.status)) patch.status = d.status;
+        if (d.sourceAccountId !== undefined) patch.sourceAccountId = sanitizeOptStr(d.sourceAccountId, 128);
+        if (d.addToAccount !== undefined) patch.addToAccount = Boolean(d.addToAccount);
         if (d.category !== undefined) patch.category = sanitizeOptStr(d.category, 80);
         if (d.notes !== undefined) patch.notes = sanitizeOptStr(d.notes, 1000);
         await db.update(qhubMyDebts).set(patch).where(and(eq(qhubMyDebts.userId, uid), eq(qhubMyDebts.id, id)));

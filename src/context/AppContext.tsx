@@ -7,7 +7,7 @@ import {
   signOut
 } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
-import { isContraVoidTransaction } from '../utils/accounting';
+import { isContraVoidTransaction, BASE_CHART_OF_ACCOUNTS, inferLiabilityCoaCode } from '../utils/accounting';
 import { getDebtLineItems, sanitizeSafeImageSrc } from '../utils/debtItems';
 import {
   NavigationTab,
@@ -33,7 +33,8 @@ import {
   ReimburseProjectType,
   ReimburseStatus,
   LogbookEntry,
-  SavedBarcode
+  SavedBarcode,
+  ChartOfAccount
 } from '../types';
 
 interface ToastMessage {
@@ -53,6 +54,8 @@ interface AppContextType {
   signInWithGoogle: () => Promise<void>;
   signInWithUsernamePassword: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   registerWithUsernamePassword: (username: string, password: string, displayName?: string) => Promise<{ ok: boolean; error?: string }>;
+  linkUsernamePassword: (username: string, password: string, currentPassword?: string) => Promise<{ ok: boolean; error?: string }>;
+  linkGoogleAccount: () => Promise<{ ok: boolean; error?: string }>;
   signOutGoogle: () => Promise<void>;
   signOutUser: () => Promise<void>;
   pushLocalWorkspaceToCloud: () => Promise<void>;
@@ -82,6 +85,9 @@ interface AppContextType {
   importAccountsFromCSV: (csvText: string) => { success: boolean; count: number; error?: string };
   transferBetweenAccounts: (payload: AccountTransferPayload) => { success: boolean; transferId?: string; error?: string };
   addCoaAdjustment: (payload: CoaAdjustmentPayload) => void;
+  customCoaAccounts: ChartOfAccount[];
+  upsertCoaAccount: (coa: ChartOfAccount) => void;
+  deleteCustomCoaAccount: (code: string) => void;
 
   // Finance Transactions & Cash / Non-Cash
   transactions: FinanceTransaction[];
@@ -208,6 +214,7 @@ const USER_STORAGE_KEYS = [
   'omnihub_saved_barcodes',
   'omnihub_reimbursements',
   'omnihub_reimburse_rates',
+  'omnihub_custom_coa',
 ];
 
 function clearUserWorkspaceStorage() {
@@ -270,6 +277,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
   const localTokenRef = useRef<string | null>(null);
+  const isLinkingGoogleRef = useRef<boolean>(false);
   const authUserRef = useRef<AuthUser | null>(null);
   authUserRef.current = authUser;
   const dbConfiguredRef = useRef<boolean>(true);
@@ -356,6 +364,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [reimburseRates, setReimburseRates] = useState<ReimburseRate[]>(() =>
     readJsonStorage<ReimburseRate[]>('omnihub_reimburse_rates', DEFAULT_REIMBURSE_RATES)
   );
+  const [customCoaAccounts, setCustomCoaAccounts] = useState<ChartOfAccount[]>(() =>
+    readJsonStorage<ChartOfAccount[]>('omnihub_custom_coa', [])
+  );
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -365,6 +376,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     profile,
     theme,
     noteCategories,
+    customCoa: customCoaAccounts,
     accounts,
     transactions,
     debts,
@@ -382,6 +394,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     profile,
     theme,
     noteCategories,
+    customCoa: customCoaAccounts,
     accounts,
     transactions,
     debts,
@@ -443,6 +456,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem('omnihub_saved_barcodes', JSON.stringify(savedBarcodes)); }, [savedBarcodes]);
   useEffect(() => { localStorage.setItem('omnihub_reimbursements', JSON.stringify(reimbursements)); }, [reimbursements]);
   useEffect(() => { localStorage.setItem('omnihub_reimburse_rates', JSON.stringify(reimburseRates)); }, [reimburseRates]);
+  useEffect(() => { localStorage.setItem('omnihub_custom_coa', JSON.stringify(customCoaAccounts)); }, [customCoaAccounts]);
 
   useEffect(() => {
     const appTitle = appBranding.appName?.trim() || "Q'Hub";
@@ -525,6 +539,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (Array.isArray(ws.preferences.noteCategories)) {
         setNoteCategories(ws.preferences.noteCategories);
       }
+      if (Array.isArray(ws.preferences.customCoa)) {
+        setCustomCoaAccounts(ws.preferences.customCoa);
+      }
     }
     if (Array.isArray(ws.accounts)) setAccounts(ws.accounts);
     if (Array.isArray(ws.transactions)) {
@@ -563,6 +580,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCategoryBudgets([]);
     setNotes([]);
     setNoteCategories(DEFAULT_NOTE_CATEGORIES);
+    setCustomCoaAccounts([]);
     setHabits([]);
     setLogbookEntries([]);
     setSavedBarcodes([]);
@@ -573,6 +591,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       profile: defaultProfile,
       theme,
       noteCategories: DEFAULT_NOTE_CATEGORIES,
+      customCoa: [],
       accounts: [],
       transactions: [],
       debts: [],
@@ -715,6 +734,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let cancelled = false;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (isLinkingGoogleRef.current) {
+        return;
+      }
+
       if (!firebaseUser) {
         setUser(null);
         // Only clear authUser if not currently signed in with local username/password
@@ -726,25 +749,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      const prevUid = localStorage.getItem('omnihub_active_uid');
-      const displayName = firebaseUser.displayName || firebaseUser.email || 'Pengguna Google';
-      if (prevUid !== firebaseUser.uid) {
-        resetPrivateWorkspaceToDefaults(displayName);
+      const fallbackDisplayName = firebaseUser.displayName || firebaseUser.email || 'Pengguna Google';
+      let resolvedAuthUser: AuthUser = {
+        uid: firebaseUser.uid,
+        email: firebaseUser.email || undefined,
+        googleEmail: firebaseUser.email || undefined,
+        displayName: fallbackDisplayName,
+        authType: 'google',
+        hasGoogle: true,
+        hasPassword: false,
+      };
+
+      try {
+        const fbToken = await firebaseUser.getIdToken();
+        const meRes = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${fbToken}` },
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json().catch(() => null);
+          if (meData?.user?.uid) {
+            resolvedAuthUser = meData.user as AuthUser;
+          }
+        }
+      } catch {
+        // Fallback to Firebase profile if /api/auth/me is temporarily unreachable
       }
-      localStorage.setItem('omnihub_active_uid', firebaseUser.uid);
+
+      const effectiveUid = resolvedAuthUser.uid || firebaseUser.uid;
+      const effectiveDisplayName = resolvedAuthUser.displayName || fallbackDisplayName;
+      const prevUid = localStorage.getItem('omnihub_active_uid');
+      if (prevUid !== effectiveUid) {
+        resetPrivateWorkspaceToDefaults(effectiveDisplayName);
+      }
+      localStorage.setItem('omnihub_active_uid', effectiveUid);
 
       localTokenRef.current = null;
       setUser(firebaseUser);
-      setAuthUser({
-        uid: firebaseUser.uid,
-        email: firebaseUser.email || undefined,
-        displayName,
-        authType: 'google',
-      });
+      setAuthUser(resolvedAuthUser);
       setAuthLoading(false);
       dbConfiguredRef.current = true;
       if (!cancelled) {
-        await loadWorkspaceFromPostgres({ displayName });
+        await loadWorkspaceFromPostgres({ displayName: effectiveDisplayName });
       }
     });
 
@@ -862,6 +907,82 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       setSyncStatus('local');
       return { ok: false, error: 'Tidak dapat terhubung ke server registrasi.' };
+    }
+  };
+
+  const linkUsernamePassword = async (
+    username: string,
+    password: string,
+    currentPassword?: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!hasActiveSession()) {
+      return { ok: false, error: 'Silakan masuk terlebih dahulu.' };
+    }
+    try {
+      const data = await apiFetch<{ user: AuthUser; token?: string }>('/api/auth/link-credentials', {
+        method: 'POST',
+        body: JSON.stringify({ username, password, currentPassword }),
+      });
+      if (data?.user) {
+        setAuthUser(data.user);
+        showToast(
+          `Login username @${data.user.username} berhasil ditautkan ke akun ini!`,
+          'success'
+        );
+        return { ok: true };
+      }
+      return { ok: false, error: 'Gagal menautkan username & password.' };
+    } catch (err) {
+      const msg = err instanceof ApiRequestError ? err.message : 'Tidak dapat menautkan kredensial.';
+      showToast(msg, 'error');
+      return { ok: false, error: msg };
+    }
+  };
+
+  const linkGoogleAccount = async (): Promise<{ ok: boolean; error?: string }> => {
+    if (!hasActiveSession()) {
+      return { ok: false, error: 'Silakan masuk terlebih dahulu.' };
+    }
+    const hadLocalSession = Boolean(localTokenRef.current);
+    isLinkingGoogleRef.current = true;
+    try {
+      const popupResult = await signInWithPopup(auth, googleProvider);
+      const googleIdToken = await popupResult.user.getIdToken();
+      const data = await apiFetch<{ user: AuthUser }>('/api/auth/link-google', {
+        method: 'POST',
+        body: JSON.stringify({ googleIdToken }),
+      });
+
+      if (hadLocalSession && auth.currentUser) {
+        await signOut(auth).catch(() => {});
+      } else if (popupResult.user) {
+        setUser(popupResult.user);
+      }
+
+      if (data?.user) {
+        setAuthUser(data.user);
+        showToast(
+          `Akun Google (${data.user.googleEmail || popupResult.user.email}) berhasil dihubungkan ke workspace ini!`,
+          'success'
+        );
+        return { ok: true };
+      }
+      return { ok: false, error: 'Gagal menghubungkan akun Google.' };
+    } catch (err: any) {
+      if (hadLocalSession && auth.currentUser) {
+        await signOut(auth).catch(() => {});
+      }
+      if (err?.code === 'auth/popup-closed-by-user') {
+        showToast('Penautan akun Google dibatalkan.', 'info');
+        return { ok: false, error: 'Penautan dibatalkan.' };
+      }
+      const msg = err instanceof ApiRequestError
+        ? err.message
+        : err?.message || 'Gagal menghubungkan akun Google.';
+      showToast(msg, 'error');
+      return { ok: false, error: msg };
+    } finally {
+      isLinkingGoogleRef.current = false;
     }
   };
 
@@ -1309,6 +1430,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+  // Custom / Edited COA operations
+  const upsertCoaAccount = (coa: ChartOfAccount) => {
+    const cleanCode = coa.code.trim();
+    const cleanName = coa.name.trim();
+    if (!cleanCode || !cleanName) return;
+
+    const normalized: ChartOfAccount = {
+      code: cleanCode,
+      name: cleanName,
+      category: coa.category,
+      subCategory: coa.subCategory.trim() || 'Kustom',
+      normalBalance: coa.normalBalance,
+      description: coa.description?.trim() || undefined,
+      linkedAccountId: coa.linkedAccountId,
+      isCustom: true,
+    };
+
+    const nextList = customCoaAccounts.some(c => c.code === cleanCode)
+      ? customCoaAccounts.map(c => (c.code === cleanCode ? normalized : c))
+      : [...customCoaAccounts, normalized];
+
+    setCustomCoaAccounts(nextList);
+    if (hasActiveSession()) {
+      void cloudUpdateDoc('preferences', 'main', { customCoa: nextList });
+    }
+    showToast(`COA [${cleanCode}] ${cleanName} berhasil disimpan!`, 'success');
+  };
+
+  const deleteCustomCoaAccount = (code: string) => {
+    const cleanCode = code.trim();
+    const nextList = customCoaAccounts.filter(c => c.code !== cleanCode);
+    setCustomCoaAccounts(nextList);
+    if (hasActiveSession()) {
+      void cloudUpdateDoc('preferences', 'main', { customCoa: nextList });
+    }
+    showToast(`Perubahan/akun kustom COA [${cleanCode}] dihapus.`, 'info');
+  };
+
   // Finance operations
   const addTransaction = (tx: Omit<FinanceTransaction, 'id'>) => {
     const id = 'tx-' + Date.now();
@@ -1337,7 +1496,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateTransaction = (id: string, updates: Partial<FinanceTransaction>) => {
-    setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    const cleanStateUpdates: Partial<FinanceTransaction> = { ...updates };
+    if ((cleanStateUpdates as Record<string, unknown>).coaCode === null) cleanStateUpdates.coaCode = undefined;
+    if ((cleanStateUpdates as Record<string, unknown>).coaName === null) cleanStateUpdates.coaName = undefined;
+    if ((cleanStateUpdates as Record<string, unknown>).notes === null) cleanStateUpdates.notes = undefined;
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...cleanStateUpdates } : t));
     void cloudUpdateDoc('transactions', id, updates as Record<string, unknown>);
     showToast('Transaksi diperbarui', 'info');
   };
@@ -1427,11 +1590,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Hutang Saya (Liabilitas / PayLater / Cicilan) operations
   const addMyDebt = (debt: Omit<MyDebtLiability, 'id'>): string => {
-    const id = 'mdeb-' + Date.now();
-    const newDebt: MyDebtLiability = { ...debt, id };
+    const baseTs = Date.now();
+    const id = 'mdeb-' + baseTs;
+
+    let sourceTransactionId = debt.sourceTransactionId;
+    let resolvedAccountName = debt.sourceAccountName;
+    const shouldAddToAccount = Boolean(debt.addToAccount && debt.sourceAccountId);
+
+    if (shouldAddToAccount && debt.sourceAccountId) {
+      const targetAcc = accounts.find(a => a.id === debt.sourceAccountId);
+      if (targetAcc) {
+        resolvedAccountName = targetAcc.name;
+        sourceTransactionId = 'tx-' + (baseTs + 1);
+        const liabilityCode = inferLiabilityCoaCode(`${debt.creditorName} ${debt.description}`);
+        const liabilityCoa =
+          customCoaAccounts.find(c => c.code === liabilityCode) ||
+          BASE_CHART_OF_ACCOUNTS.find(c => c.code === liabilityCode);
+        const inflowTx: FinanceTransaction = {
+          id: sourceTransactionId,
+          type: 'income',
+          title: `Pencairan Hutang: ${debt.creditorName} (${debt.description || 'Pinjaman'})`,
+          amount: debt.amount,
+          category: 'Pencairan Hutang',
+          date: debt.issuedDate || new Date().toISOString().split('T')[0],
+          paymentMethod: targetAcc.type === 'cash' ? 'Cash' : targetAcc.type === 'ewallet' ? 'E-Wallet' : 'Bank Transfer',
+          walletType: targetAcc.type === 'cash' ? 'cash' : 'non_cash',
+          accountId: targetAcc.id,
+          accountName: targetAcc.name,
+          relatedDebtId: id,
+          coaCode: liabilityCode,
+          coaName: liabilityCoa?.name || 'Utang Pribadi Jangka Pendek',
+          notes: `Dana pinjaman / hutang dari ${debt.creditorName} ditambahkan ke saldo ${targetAcc.name}`,
+        };
+        setTransactions(prev => [inflowTx, ...prev]);
+        void cloudWriteDoc('transactions', sourceTransactionId, inflowTx as unknown as Record<string, unknown>);
+      }
+    }
+
+    const newDebt: MyDebtLiability = {
+      ...debt,
+      id,
+      addToAccount: shouldAddToAccount,
+      sourceAccountName: resolvedAccountName,
+      sourceTransactionId,
+    };
+
     setMyDebts(prev => [newDebt, ...prev]);
     void cloudWriteDoc('myDebts', id, newDebt as unknown as Record<string, unknown>);
-    showToast(`Hutang baru kepada "${debt.creditorName}" berhasil dicatat!`, 'warning');
+
+    if (sourceTransactionId && resolvedAccountName) {
+      showToast(
+        `Hutang kepada "${debt.creditorName}" dicatat & saldo ${resolvedAccountName} bertambah Rp ${debt.amount.toLocaleString('id-ID')}!`,
+        'success'
+      );
+    } else {
+      showToast(`Hutang baru kepada "${debt.creditorName}" berhasil dicatat!`, 'warning');
+    }
     return id;
   };
 
@@ -1442,6 +1656,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteMyDebt = (id: string) => {
+    const target = myDebts.find(d => d.id === id);
+    if (target?.sourceTransactionId) {
+      setTransactions(prev => prev.filter(t => t.id !== target.sourceTransactionId));
+      void cloudDeleteDoc('transactions', target.sourceTransactionId);
+    }
     setMyDebts(prev => prev.filter(d => d.id !== id));
     void cloudDeleteDoc('myDebts', id);
     showToast('Hutang dihapus', 'info');
@@ -1944,7 +2163,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       logbookEntries,
       savedBarcodes,
       reimbursements,
-      reimburseRates
+      reimburseRates,
+      customCoa: customCoaAccounts
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1972,6 +2192,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (Array.isArray(data.savedBarcodes)) setSavedBarcodes(data.savedBarcodes);
       if (Array.isArray(data.reimbursements)) setReimbursements(data.reimbursements);
       if (Array.isArray(data.reimburseRates)) setReimburseRates(data.reimburseRates);
+      if (Array.isArray(data.customCoa)) setCustomCoaAccounts(data.customCoa);
 
       if (hasActiveSession()) {
         setTimeout(() => {
@@ -2010,6 +2231,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         signInWithGoogle,
         signInWithUsernamePassword,
         registerWithUsernamePassword,
+        linkUsernamePassword,
+        linkGoogleAccount,
         signOutGoogle,
         signOutUser,
         pushLocalWorkspaceToCloud,
@@ -2029,6 +2252,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         importAccountsFromCSV,
         transferBetweenAccounts,
         addCoaAdjustment,
+        customCoaAccounts,
+        upsertCoaAccount,
+        deleteCustomCoaAccount,
         todos,
         addTodo,
         updateTodo,

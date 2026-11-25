@@ -17,6 +17,8 @@ import {
   getAllChartOfAccounts,
   getCoaForFinancialAccount,
   getCoaForCategory,
+  getEffectiveContraCoaForTransaction,
+  normalizeCoaCode,
   generateStandardJournalEntries,
   calculateCoaLedgers,
   getAccountingEquationSummary,
@@ -57,6 +59,36 @@ import { AccountTransferModal } from './AccountTransferModal';
 
 type FinanceSubTab = 'overview' | 'accounts' | 'general-ledger' | 'my-debts' | 'debts';
 
+const EXPENSE_CATEGORY_OPTIONS = [
+  'Makan & Minum Harian',
+  'Tempat Tinggal & Utilitas',
+  'Transportasi & BBM',
+  'Komunikasi & Langganan Dasar',
+  'Kesehatan & Obat-obatan',
+  'Jajan, Kopi & Makan di Luar',
+  'Belanja Pribadi & Penampilan',
+  'Hiburan, Hobi & Liburan',
+  'Beban Bunga Pinjaman',
+  'Biaya Admin Bank & Transfer',
+  'Pajak Pribadi',
+  'Premi Asuransi',
+  'Zakat, Infak, Sedekah & Donasi',
+  'Hadiah & Acara Keluarga',
+  'Pendidikan & Pengembangan Diri',
+  'Cicilan & Hutang',
+];
+
+const INCOME_CATEGORY_OPTIONS = [
+  'Gaji & Tunjangan Tetap',
+  'Bonus, THR & Insentif',
+  'Pendapatan Freelance / Sampingan',
+  'Bunga Tabungan & Deposito',
+  'Dividen & Capital Gain',
+  'Pendapatan Sewa',
+  'Hadiah, Hibah & Cashback',
+  'Pelunasan Piutang',
+];
+
 const parseCurrencyInput = (raw: string): number => {
   const digits = raw.replace(/[^0-9]/g, '');
   return digits ? parseInt(digits, 10) : 0;
@@ -83,9 +115,13 @@ export const FinanceTrackerView: React.FC = () => {
     importAccountsFromCSV,
     transactions,
     addTransaction,
+    updateTransaction,
     deleteTransaction,
     voidTransaction,
     addCoaAdjustment,
+    customCoaAccounts,
+    upsertCoaAccount,
+    deleteCustomCoaAccount,
     debts,
     addDebt,
     updateDebt,
@@ -117,10 +153,12 @@ export const FinanceTrackerView: React.FC = () => {
 
   // ================= TRANSACTION MODAL STATE =================
   const [isAddingTx, setIsAddingTx] = useState(false);
+  const [editingTx, setEditingTx] = useState<FinanceTransaction | null>(null);
   const [txType, setTxType] = useState<'income' | 'expense'>('expense');
   const [txTitle, setTxTitle] = useState('');
   const [txAmount, setTxAmount] = useState('');
-  const [txCategory, setTxCategory] = useState('Food & Dining');
+  const [txCategory, setTxCategory] = useState('Makan & Minum Harian');
+  const [txCoaCode, setTxCoaCode] = useState('');
   const [txAccountId, setTxAccountId] = useState<string>(() => accounts[0]?.id || '');
   const [txPaymentMethod, setTxPaymentMethod] = useState<'Bank Transfer' | 'E-Wallet' | 'Cash' | 'Credit Card'>('Bank Transfer');
   const [txDate, setTxDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -142,6 +180,7 @@ export const FinanceTrackerView: React.FC = () => {
   const [accType, setAccType] = useState<AccountType>('bank');
   const [accInitialBalance, setAccInitialBalance] = useState('');
   const [accNumber, setAccNumber] = useState('');
+  const [accCoaCode, setAccCoaCode] = useState('');
   const [accNotes, setAccNotes] = useState('');
 
   // Upload Saldo Awal Modal
@@ -153,6 +192,7 @@ export const FinanceTrackerView: React.FC = () => {
   const [editAccNameInput, setEditAccNameInput] = useState('');
   const [editAccNumberInput, setEditAccNumberInput] = useState('');
   const [editBalanceInput, setEditBalanceInput] = useState('');
+  const [editAccCoaCode, setEditAccCoaCode] = useState('');
   const [editAccNotesInput, setEditAccNotesInput] = useState('');
 
   // ================= MY DEBTS (HUTANG SAYA) MODAL STATE =================
@@ -160,12 +200,14 @@ export const FinanceTrackerView: React.FC = () => {
   const [myDebtCreditor, setMyDebtCreditor] = useState('');
   const [myDebtDesc, setMyDebtDesc] = useState('');
   const [myDebtAmount, setMyDebtAmount] = useState('');
+  const [myDebtIssuedDate, setMyDebtIssuedDate] = useState(() => getOffsetDateStr(0));
   const [myDebtDueDate, setMyDebtDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 30);
     return d.toISOString().split('T')[0];
   });
-  const [myDebtCategory, setMyDebtCategory] = useState('Work & Software');
+  const [myDebtCategory, setMyDebtCategory] = useState('Komunikasi & Langganan Dasar');
+  const [myDebtAddToAccount, setMyDebtAddToAccount] = useState<boolean>(() => accounts.length > 0);
   const [myDebtAccountId, setMyDebtAccountId] = useState<string>(() => accounts[0]?.id || '');
 
   // Modal Bayar Hutang Saya
@@ -179,7 +221,7 @@ export const FinanceTrackerView: React.FC = () => {
   const [adjAccountId, setAdjAccountId] = useState<string>(() => accounts[0]?.id || '');
   const [adjType, setAdjType] = useState<'increase' | 'decrease'>('increase');
   const [adjAmount, setAdjAmount] = useState('');
-  const [adjCoaCode, setAdjCoaCode] = useState('3-1200');
+  const [adjCoaCode, setAdjCoaCode] = useState('3201');
   const [adjDate, setAdjDate] = useState(() => getOffsetDateStr(0));
   const [adjDescription, setAdjDescription] = useState('');
 
@@ -261,7 +303,7 @@ export const FinanceTrackerView: React.FC = () => {
   const [editingBudgetCategory, setEditingBudgetCategory] = useState<string | null>(null);
   const [budgetLimitInput, setBudgetLimitInput] = useState('');
   const [isAddingBudgetCategory, setIsAddingBudgetCategory] = useState(false);
-  const [newBudgetCategoryInput, setNewBudgetCategoryInput] = useState('Food & Dining');
+  const [newBudgetCategoryInput, setNewBudgetCategoryInput] = useState('Makan & Minum Harian');
   const [newBudgetCustomName, setNewBudgetCustomName] = useState('');
 
   // ================= ACCOUNT LEDGER / MUTASI STATE =================
@@ -357,6 +399,9 @@ export const FinanceTrackerView: React.FC = () => {
   const monthlyCategoryExpenses: Record<string, number> = {};
 
   monthlyTransactions.forEach(t => {
+    if (t.category === 'Pencairan Hutang') {
+      return;
+    }
     if (isContraVoidTransaction(t)) {
       if (t.type === 'income') {
         monthlyExpense -= t.amount;
@@ -414,10 +459,13 @@ export const FinanceTrackerView: React.FC = () => {
   const totalRemainingMonthlyBudget = totalConfiguredMonthlyBudget - totalBudgetedSpentThisMonth;
 
   // 6. Chart of Accounts & General Journal Calculations
-  const allCoaList = useMemo(() => getAllChartOfAccounts(accounts), [accounts]);
-  const standardJournalEntries = useMemo(() =>
-    generateStandardJournalEntries(transactions, accounts, myDebts, debts),
-    [transactions, accounts, myDebts, debts]
+  const allCoaList = useMemo(
+    () => getAllChartOfAccounts(accounts, customCoaAccounts),
+    [accounts, customCoaAccounts]
+  );
+  const standardJournalEntries = useMemo(
+    () => generateStandardJournalEntries(transactions, accounts, myDebts, debts, customCoaAccounts),
+    [transactions, accounts, myDebts, debts, customCoaAccounts]
   );
   const coaLedgers = useMemo(() =>
     calculateCoaLedgers(allCoaList, standardJournalEntries),
@@ -439,7 +487,40 @@ export const FinanceTrackerView: React.FC = () => {
     });
 
   // =================== HANDLERS ===================
-  // 1. Save Transaction & optional MyDebt (Formatted Currency + Back Date)
+  const openAddTxModal = (preselectedAccountId?: string) => {
+    setEditingTx(null);
+    setTxType('expense');
+    setTxTitle('');
+    setTxAmount('');
+    setTxCategory('Makan & Minum Harian');
+    setTxCoaCode('');
+    setTxAccountId(preselectedAccountId || accounts[0]?.id || '');
+    setTxDate(new Date().toISOString().split('T')[0]);
+    setTxNotes('');
+    setIsCreditDebt(false);
+    setDebtDownPayment('');
+    setIsAddingTx(true);
+  };
+
+  const openEditTxModal = (tx: FinanceTransaction) => {
+    setEditingTx(tx);
+    setTxType(tx.type);
+    setTxTitle(tx.title);
+    setTxAmount(tx.amount.toLocaleString('id-ID'));
+    setTxCategory(tx.category);
+    const normalizedExplicit = tx.coaCode ? normalizeCoaCode(tx.coaCode) : '';
+    const hasMatch = normalizedExplicit ? allCoaList.some(c => c.code === normalizedExplicit) : false;
+    setTxCoaCode(hasMatch && normalizedExplicit ? normalizedExplicit : '');
+    const matchedAcc = accounts.find(a => a.id === tx.accountId) || accounts.find(a => a.name === tx.accountName) || accounts[0];
+    setTxAccountId(matchedAcc?.id || '');
+    setTxDate(tx.date);
+    setTxNotes(tx.notes || '');
+    setIsCreditDebt(false);
+    setDebtDownPayment('');
+    setIsAddingTx(true);
+  };
+
+  // 1. Save Transaction (Create or Edit + COA Assignment)
   const handleSaveTransaction = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedAmount = parseCurrencyInput(txAmount);
@@ -447,67 +528,96 @@ export const FinanceTrackerView: React.FC = () => {
 
     const selectedAcc = accounts.find(a => a.id === txAccountId) || accounts[0];
     const resolvedWalletType: WalletType = selectedAcc?.type === 'cash' ? 'cash' : 'non_cash';
+    const resolvedPaymentMethod: FinanceTransaction['paymentMethod'] =
+      selectedAcc?.type === 'cash' ? 'Cash' : selectedAcc?.type === 'ewallet' ? 'E-Wallet' : 'Bank Transfer';
 
     const assetCoa = selectedAcc ? getCoaForFinancialAccount(selectedAcc, allCoaList) : allCoaList[0];
+    const autoContraCoa = getCoaForCategory(txCategory, txType, allCoaList);
+    const manualContraCoa = txCoaCode ? allCoaList.find(c => c.code === txCoaCode) : undefined;
+    const contraCoa = manualContraCoa || autoContraCoa;
+
     let debitCode = '';
     let debitName = '';
     let creditCode = '';
     let creditName = '';
 
     if (txType === 'income') {
-      const revCoa = getCoaForCategory(txCategory, 'income', allCoaList);
       debitCode = assetCoa.code;
       debitName = assetCoa.name;
-      creditCode = revCoa.code;
-      creditName = revCoa.name;
+      creditCode = contraCoa.code;
+      creditName = contraCoa.name;
     } else {
-      const expCoa = getCoaForCategory(txCategory, 'expense', allCoaList);
-      debitCode = expCoa.code;
-      debitName = expCoa.name;
+      debitCode = contraCoa.code;
+      debitName = contraCoa.name;
       creditCode = assetCoa.code;
       creditName = assetCoa.name;
     }
 
-    addTransaction({
-      type: txType,
-      title: txTitle.trim(),
-      amount: parsedAmount,
-      category: txCategory,
-      date: txDate,
-      paymentMethod: selectedAcc?.type === 'cash' ? 'Cash' : selectedAcc?.type === 'ewallet' ? 'E-Wallet' : 'Bank Transfer',
-      walletType: resolvedWalletType,
-      accountId: selectedAcc?.id,
-      accountName: selectedAcc?.name || 'Rekening',
-      notes: txNotes.trim() || undefined,
-      debitAccountCode: debitCode,
-      debitAccountName: debitName,
-      creditAccountCode: creditCode,
-      creditAccountName: creditName
-    });
+    if (editingTx) {
+      updateTransaction(editingTx.id, {
+        type: txType,
+        title: txTitle.trim(),
+        amount: parsedAmount,
+        category: txCategory,
+        date: txDate,
+        paymentMethod: resolvedPaymentMethod,
+        walletType: resolvedWalletType,
+        accountId: selectedAcc?.id,
+        accountName: selectedAcc?.name || 'Rekening',
+        notes: (txNotes.trim() || null) as unknown as string,
+        debitAccountCode: debitCode,
+        debitAccountName: debitName,
+        creditAccountCode: creditCode,
+        creditAccountName: creditName,
+        coaCode: (manualContraCoa ? manualContraCoa.code : null) as unknown as string,
+        coaName: (manualContraCoa ? manualContraCoa.name : null) as unknown as string,
+      });
+    } else {
+      addTransaction({
+        type: txType,
+        title: txTitle.trim(),
+        amount: parsedAmount,
+        category: txCategory,
+        date: txDate,
+        paymentMethod: resolvedPaymentMethod,
+        walletType: resolvedWalletType,
+        accountId: selectedAcc?.id,
+        accountName: selectedAcc?.name || 'Rekening',
+        notes: txNotes.trim() || undefined,
+        debitAccountCode: debitCode,
+        debitAccountName: debitName,
+        creditAccountCode: creditCode,
+        creditAccountName: creditName,
+        coaCode: manualContraCoa?.code,
+        coaName: manualContraCoa?.name,
+      });
 
-    // If marked as creating MyDebt
-    if (isCreditDebt && txType === 'expense') {
-      const parsedDP = parseCurrencyInput(debtDownPayment);
-      const totalDebt = parsedAmount - parsedDP;
+      // If marked as creating MyDebt
+      if (isCreditDebt && txType === 'expense') {
+        const parsedDP = parseCurrencyInput(debtDownPayment);
+        const totalDebt = parsedAmount - parsedDP;
 
-      if (totalDebt > 0) {
-        addMyDebt({
-          creditorName: debtCreditorName.trim() || 'Kreditur',
-          description: `Hutang transaksi: ${txTitle.trim()}`,
-          amount: totalDebt,
-          amountPaid: 0,
-          dueDate: debtDueDateInput,
-          issuedDate: txDate,
-          status: 'unpaid',
-          sourceAccountId: selectedAcc?.id,
-          category: txCategory,
-          notes: `Timbul dari transaksi belanja "${txTitle.trim()}"`
-        });
+        if (totalDebt > 0) {
+          addMyDebt({
+            creditorName: debtCreditorName.trim() || 'Kreditur',
+            description: `Hutang transaksi: ${txTitle.trim()}`,
+            amount: totalDebt,
+            amountPaid: 0,
+            dueDate: debtDueDateInput,
+            issuedDate: txDate,
+            status: 'unpaid',
+            sourceAccountId: selectedAcc?.id,
+            category: txCategory,
+            notes: `Timbul dari transaksi belanja "${txTitle.trim()}"`
+          });
+        }
       }
     }
 
+    setEditingTx(null);
     setTxTitle('');
     setTxAmount('');
+    setTxCoaCode('');
     setTxNotes('');
     setIsCreditDebt(false);
     setDebtDownPayment('');
@@ -526,6 +636,7 @@ export const FinanceTrackerView: React.FC = () => {
       type: accType,
       initialBalance: parsedInit,
       accountNumber: accNumber.trim() || undefined,
+      coaCode: accCoaCode || undefined,
       color,
       notes: accNotes.trim() || undefined
     });
@@ -533,16 +644,18 @@ export const FinanceTrackerView: React.FC = () => {
     setAccName('');
     setAccInitialBalance('');
     setAccNumber('');
+    setAccCoaCode('');
     setAccNotes('');
     setIsAddingAccount(false);
   };
 
-  // 3. Open & Update Account Details (Name, Account Number, Initial Balance, Notes)
+  // 3. Open & Update Account Details (Name, Account Number, COA, Initial Balance, Notes)
   const openEditAccountModal = (acc: FinancialAccount) => {
     setEditingAcc(acc);
     setEditAccNameInput(acc.name);
     setEditAccNumberInput(acc.accountNumber || '');
     setEditBalanceInput(acc.initialBalance.toLocaleString('id-ID'));
+    setEditAccCoaCode(acc.coaCode ? (normalizeCoaCode(acc.coaCode) || '') : '');
     setEditAccNotesInput(acc.notes || '');
   };
 
@@ -554,12 +667,14 @@ export const FinanceTrackerView: React.FC = () => {
       name: editAccNameInput.trim() || editingAcc.name,
       accountNumber: editAccNumberInput.trim(),
       initialBalance: parsed,
+      coaCode: (editAccCoaCode || null) as unknown as string,
       notes: editAccNotesInput.trim(),
     });
     setEditingAcc(null);
     setEditAccNameInput('');
     setEditAccNumberInput('');
     setEditBalanceInput('');
+    setEditAccCoaCode('');
     setEditAccNotesInput('');
   };
 
@@ -595,21 +710,27 @@ export const FinanceTrackerView: React.FC = () => {
     const parsed = parseCurrencyInput(myDebtAmount);
     if (!myDebtCreditor.trim() || !parsed) return;
 
+    const chosenAccountId = myDebtAddToAccount ? (myDebtAccountId || accounts[0]?.id) : undefined;
+    const chosenAccount = chosenAccountId ? accounts.find(a => a.id === chosenAccountId) : undefined;
+
     addMyDebt({
       creditorName: myDebtCreditor.trim(),
       description: myDebtDesc.trim() || 'Kewajiban Hutang',
       amount: parsed,
       amountPaid: 0,
       dueDate: myDebtDueDate,
-      issuedDate: getOffsetDateStr(0),
+      issuedDate: myDebtIssuedDate || getOffsetDateStr(0),
       status: 'unpaid',
-      sourceAccountId: myDebtAccountId || accounts[0]?.id,
+      sourceAccountId: chosenAccount?.id,
+      sourceAccountName: chosenAccount?.name,
+      addToAccount: Boolean(myDebtAddToAccount && chosenAccount),
       category: myDebtCategory
     });
 
     setMyDebtCreditor('');
     setMyDebtDesc('');
     setMyDebtAmount('');
+    setMyDebtIssuedDate(getOffsetDateStr(0));
     setIsAddingMyDebt(false);
   };
 
@@ -1047,10 +1168,7 @@ export const FinanceTrackerView: React.FC = () => {
         {/* Action Button: Catat Transaksi Baru */}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => {
-              if (!txAccountId && accounts[0]) setTxAccountId(accounts[0].id);
-              setIsAddingTx(true);
-            }}
+            onClick={() => openAddTxModal()}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-100 shadow-xs transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -1235,7 +1353,7 @@ export const FinanceTrackerView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    setNewBudgetCategoryInput('Food & Dining');
+                    setNewBudgetCategoryInput('Makan & Minum Harian');
                     setNewBudgetCustomName('');
                     setBudgetLimitInput('');
                     setIsAddingBudgetCategory(true);
@@ -1291,7 +1409,7 @@ export const FinanceTrackerView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    setNewBudgetCategoryInput('Food & Dining');
+                    setNewBudgetCategoryInput('Makan & Minum Harian');
                     setNewBudgetCustomName('');
                     setBudgetLimitInput('');
                     setIsAddingBudgetCategory(true);
@@ -1442,6 +1560,7 @@ export const FinanceTrackerView: React.FC = () => {
                   const isVoided = Boolean(tx.isVoided);
                   const isContra = isContraVoidTransaction(tx);
                   const cleanVoidReason = formatVoidReason(tx.voidReason);
+                  const effectiveContraCoa = getEffectiveContraCoaForTransaction(tx, allCoaList, myDebts);
 
                   return (
                     <div
@@ -1486,7 +1605,7 @@ export const FinanceTrackerView: React.FC = () => {
                             )}
                             {tx.isAdjustment && tx.coaCode && (
                               <span className="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">
-                                ADJ • {tx.coaCode}
+                                ADJ • {effectiveContraCoa.code}
                               </span>
                             )}
                           </div>
@@ -1496,6 +1615,10 @@ export const FinanceTrackerView: React.FC = () => {
                             </span>
                             <span>•</span>
                             <span>{tx.category}</span>
+                            <span>•</span>
+                            <span className="px-1.5 py-0.2 rounded font-mono text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300">
+                              COA {effectiveContraCoa.code} ({effectiveContraCoa.name})
+                            </span>
                             <span>•</span>
                             <span className="font-mono">{tx.date}</span>
                           </div>
@@ -1522,6 +1645,16 @@ export const FinanceTrackerView: React.FC = () => {
                         </span>
 
                         <div className="flex items-center gap-1">
+                          {!isVoided && !isContra && !tx.transferId && (
+                            <button
+                              onClick={() => openEditTxModal(tx)}
+                              className="px-2 py-1 rounded-lg text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center gap-1 cursor-pointer"
+                              title="Edit Transaksi / Ubah Akun COA"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              <span className="hidden md:inline">Edit</span>
+                            </button>
+                          )}
                           {!isVoided && !isContra && (
                             <button
                               onClick={() => {
@@ -1566,11 +1699,9 @@ export const FinanceTrackerView: React.FC = () => {
             currencySymbol={profile.currencySymbol}
             onBack={() => setSelectedAccountForLedger(null)}
             onSelectAccount={(acc) => setSelectedAccountForLedger(acc)}
-            onAddTransactionForAccount={(accId) => {
-              setTxAccountId(accId);
-              setIsAddingTx(true);
-            }}
+            onAddTransactionForAccount={(accId) => openAddTxModal(accId)}
             onEditInitialBalance={openEditAccountModal}
+            onEditTransaction={(tx) => openEditTxModal(tx)}
             onDeleteTransaction={deleteTransaction}
             onVoidTransaction={(id) => {
               const found = transactions.find(t => t.id === id);
@@ -1770,6 +1901,9 @@ export const FinanceTrackerView: React.FC = () => {
           accountingSummary={accountingSummary}
           currencySymbol={profile.currencySymbol}
           accounts={accounts}
+          customCoaAccounts={customCoaAccounts}
+          onUpsertCoa={upsertCoaAccount}
+          onDeleteCustomCoa={deleteCustomCoaAccount}
           onOpenAccountLedger={(acc) => {
             setSelectedAccountForLedger(acc);
             setActiveSubTab('accounts');
@@ -1787,7 +1921,7 @@ export const FinanceTrackerView: React.FC = () => {
             setBudgetLimitInput(currentLimit > 0 ? currentLimit.toLocaleString('id-ID') : '');
           }}
           onAddBudget={() => {
-            setNewBudgetCategoryInput('Food & Dining');
+            setNewBudgetCategoryInput('Makan & Minum Harian');
             setNewBudgetCustomName('');
             setBudgetLimitInput('');
             setIsAddingBudgetCategory(true);
@@ -1814,7 +1948,14 @@ export const FinanceTrackerView: React.FC = () => {
             </div>
 
             <button
-              onClick={() => setIsAddingMyDebt(true)}
+              onClick={() => {
+                setMyDebtIssuedDate(getOffsetDateStr(0));
+                if (!myDebtAccountId && accounts[0]) {
+                  setMyDebtAccountId(accounts[0].id);
+                }
+                setMyDebtAddToAccount(accounts.length > 0);
+                setIsAddingMyDebt(true);
+              }}
               className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-800 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -1928,8 +2069,13 @@ export const FinanceTrackerView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between text-[10px] text-neutral-400 font-mono pt-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-neutral-400 font-mono pt-1">
                         <span>Jatuh Tempo: {debt.dueDate}</span>
+                        {debt.addToAccount && debt.sourceAccountName && (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                            + Saldo {debt.sourceAccountName}
+                          </span>
+                        )}
                         <span>Dicatat: {debt.issuedDate}</span>
                       </div>
                     </div>
@@ -2143,235 +2289,313 @@ export const FinanceTrackerView: React.FC = () => {
       {/* Old Laporan P&L and AccountingView subtabs unified into General Ledger above */}
 
       {/* ========================================================= */}
-      {/* MODAL: CATAT TRANSAKSI (DENGAN OPSI TIMBUL HUTANG)        */}
+      {/* MODAL: CATAT / EDIT TRANSAKSI & PILIH COA                 */}
       {/* ========================================================= */}
-      {isAddingTx && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
-              <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
-                Catat Transaksi Baru
-              </h3>
-              <button onClick={() => setIsAddingTx(false)} className="p-1 rounded text-neutral-400 hover:text-neutral-600">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {isAddingTx && (() => {
+        const baseCategories = txType === 'expense' ? EXPENSE_CATEGORY_OPTIONS : INCOME_CATEGORY_OPTIONS;
+        const categoryOptions = baseCategories.includes(txCategory)
+          ? baseCategories
+          : [txCategory, ...baseCategories];
+        const autoMappedCoa = getCoaForCategory(txCategory, txType, allCoaList);
 
-            <form onSubmit={handleSaveTransaction} className="space-y-4">
-              {/* Type Switch */}
-              <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setTxType('expense')}
-                  className={`py-2 rounded-xl border text-center transition-all ${
-                    txType === 'expense' ? 'border-rose-500 bg-rose-50/40 text-rose-600 font-bold' : 'border-neutral-200 text-neutral-500'
-                  }`}
-                >
-                  Pengeluaran
-                </button>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
+            <div className="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                  {editingTx ? 'Edit Transaksi & Mapping COA' : 'Catat Transaksi Baru'}
+                </h3>
                 <button
                   type="button"
                   onClick={() => {
-                    setTxType('income');
-                    setIsCreditDebt(false);
+                    setIsAddingTx(false);
+                    setEditingTx(null);
                   }}
-                  className={`py-2 rounded-xl border text-center transition-all ${
-                    txType === 'income' ? 'border-emerald-500 bg-emerald-50/40 text-emerald-600 font-bold' : 'border-neutral-200 text-neutral-500'
-                  }`}
+                  className="p-1 rounded text-neutral-400 hover:text-neutral-600 cursor-pointer"
                 >
-                  Pemasukan
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                  Deskripsi / Judul
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Belanja Meja Kerja, Makan Siang..."
-                  value={txTitle}
-                  onChange={(e) => setTxTitle(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                    Nominal (Rp)
-                  </label>
-                  <div className="relative flex items-center">
-                    <span className="absolute left-3 text-xs font-mono text-neutral-400">Rp</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      required
-                      placeholder="150.000"
-                      value={txAmount}
-                      onChange={(e) => setTxAmount(formatCurrencyInput(e.target.value))}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-mono font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                    Pilih Akun / Dompet
-                  </label>
-                  <select
-                    value={txAccountId}
-                    onChange={(e) => setTxAccountId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-semibold"
+              <form onSubmit={handleSaveTransaction} className="space-y-4">
+                {/* Type Switch */}
+                <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTxType('expense');
+                      if (!editingTx && !EXPENSE_CATEGORY_OPTIONS.includes(txCategory)) {
+                        setTxCategory('Makan & Minum Harian');
+                      }
+                    }}
+                    className={`py-2 rounded-xl border text-center transition-all cursor-pointer ${
+                      txType === 'expense' ? 'border-rose-500 bg-rose-50/40 text-rose-600 font-bold' : 'border-neutral-200 text-neutral-500'
+                    }`}
                   >
-                    {accounts.map((acc) => (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.name} ({acc.type.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                    Kategori
-                  </label>
-                  <select
-                    value={txCategory}
-                    onChange={(e) => setTxCategory(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-semibold"
+                    Pengeluaran
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTxType('income');
+                      setIsCreditDebt(false);
+                      if (!editingTx && !INCOME_CATEGORY_OPTIONS.includes(txCategory)) {
+                        setTxCategory('Gaji & Tunjangan Tetap');
+                      }
+                    }}
+                    className={`py-2 rounded-xl border text-center transition-all cursor-pointer ${
+                      txType === 'income' ? 'border-emerald-500 bg-emerald-50/40 text-emerald-600 font-bold' : 'border-neutral-200 text-neutral-500'
+                    }`}
                   >
-                    <option value="Food & Dining">Food & Dining</option>
-                    <option value="Work & Software">Work & Software</option>
-                    <option value="Groceries">Groceries</option>
-                    <option value="Transport">Transport</option>
-                    <option value="Utilities">Utilities</option>
-                    <option value="Salary">Salary / Gaji</option>
-                    <option value="Freelance">Freelance</option>
-                    <option value="Cicilan & Hutang">Cicilan & Hutang</option>
-                  </select>
+                    Pemasukan
+                  </button>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                    Tanggal (Mendukung Back Date)
+                    Deskripsi / Judul
                   </label>
                   <input
-                    type="date"
-                    value={txDate}
-                    onChange={(e) => setTxDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-semibold"
+                    type="text"
+                    required
+                    placeholder="Contoh: Belanja Meja Kerja, Makan Siang..."
+                    value={txTitle}
+                    onChange={(e) => setTxTitle(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs"
                   />
-                  <div className="flex items-center gap-1 mt-1">
-                    {[
-                      { label: 'Hari Ini', days: 0 },
-                      { label: 'Kemarin', days: 1 },
-                      { label: '2 Hari Lalu', days: 2 }
-                    ].map(p => (
-                      <button
-                        key={p.days}
-                        type="button"
-                        onClick={() => setTxDate(getOffsetDateStr(p.days))}
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer ${
-                          txDate === getOffsetDateStr(p.days)
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:bg-neutral-200'
-                        }`}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                      Nominal (Rp)
+                    </label>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3 text-xs font-mono text-neutral-400">Rp</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        required
+                        placeholder="150.000"
+                        value={txAmount}
+                        onChange={(e) => setTxAmount(formatCurrencyInput(e.target.value))}
+                        className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                      Pilih Akun / Dompet
+                    </label>
+                    <select
+                      value={txAccountId}
+                      onChange={(e) => setTxAccountId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-semibold"
+                    >
+                      {accounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.type.toUpperCase()})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-              </div>
 
-              {/* Toggle: Beli dengan Hutang / PayLater / Kredit */}
-              {txType === 'expense' && (
-                <div className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50/40 dark:bg-rose-950/20 space-y-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                      Kategori
+                    </label>
+                    <select
+                      value={txCategory}
+                      onChange={(e) => setTxCategory(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-semibold"
+                    >
+                      {categoryOptions.map(cat => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                      Tanggal (Mendukung Back Date)
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={isCreditDebt}
-                      onChange={(e) => setIsCreditDebt(e.target.checked)}
-                      className="rounded accent-rose-600"
+                      type="date"
+                      value={txDate}
+                      onChange={(e) => setTxDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-semibold"
                     />
-                    <span className="text-xs font-bold text-rose-700 dark:text-rose-300">
-                      Timbul Hutang / Beli dengan PayLater / Kredit (Catat ke Hutang Saya)
-                    </span>
+                    <div className="flex items-center gap-1 mt-1">
+                      {[
+                        { label: 'Hari Ini', days: 0 },
+                        { label: 'Kemarin', days: 1 },
+                        { label: '2 Hari Lalu', days: 2 }
+                      ].map(p => (
+                        <button
+                          key={p.days}
+                          type="button"
+                          onClick={() => setTxDate(getOffsetDateStr(p.days))}
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer ${
+                            txDate === getOffsetDateStr(p.days)
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:bg-neutral-200'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* COA Lawan Selector (Otomatis atau Pilih Manual) */}
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                    Akun COA Lawan (Posting General Ledger)
                   </label>
+                  <select
+                    value={txCoaCode}
+                    onChange={(e) => setTxCoaCode(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs font-semibold"
+                  >
+                    <option value="">
+                      Otomatis dari Kategori ({autoMappedCoa.code} - {autoMappedCoa.name})
+                    </option>
+                    {(['expense', 'revenue', 'asset', 'liability', 'equity'] as const).map(grp => {
+                      const items = allCoaList.filter(c => c.category === grp);
+                      if (items.length === 0) return null;
+                      const grpLabel =
+                        grp === 'expense'
+                          ? '5000 - Beban'
+                          : grp === 'revenue'
+                          ? '4000 - Pendapatan'
+                          : grp === 'asset'
+                          ? '1000 - Aset'
+                          : grp === 'liability'
+                          ? '2000 - Liabilitas'
+                          : '3000 - Ekuitas';
+                      return (
+                        <optgroup key={grp} label={grpLabel}>
+                          {items.map(coa => (
+                            <option key={coa.code} value={coa.code}>
+                              {coa.code} - {coa.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                  <p className="text-[10px] text-neutral-400 mt-1">
+                    Biarkan "Otomatis" untuk mapping standar berdasarkan kategori, atau pilih akun COA spesifik untuk pencatatan jurnal & buku besar.
+                  </p>
+                </div>
 
-                  {isCreditDebt && (
-                    <div className="space-y-3 pt-2 text-xs">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                          Nama Kreditur / PayLater
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="Contoh: GoPay Later, SpayLater, Kartu Kredit Mandiri, Teman"
-                          value={debtCreditorName}
-                          onChange={(e) => setDebtCreditorName(e.target.value)}
-                          className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border text-xs"
-                        />
-                      </div>
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                    Catatan (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Catatan tambahan transaksi..."
+                    value={txNotes}
+                    onChange={(e) => setTxNotes(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border text-xs"
+                  />
+                </div>
 
-                      <div className="grid grid-cols-2 gap-2">
+                {/* Toggle: Beli dengan Hutang / PayLater / Kredit (Create mode only) */}
+                {!editingTx && txType === 'expense' && (
+                  <div className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50/40 dark:bg-rose-950/20 space-y-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isCreditDebt}
+                        onChange={(e) => setIsCreditDebt(e.target.checked)}
+                        className="rounded accent-rose-600"
+                      />
+                      <span className="text-xs font-bold text-rose-700 dark:text-rose-300">
+                        Timbul Hutang / Beli dengan PayLater / Kredit (Catat ke Hutang Saya)
+                      </span>
+                    </label>
+
+                    {isCreditDebt && (
+                      <div className="space-y-3 pt-2 text-xs">
                         <div>
                           <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                            Jatuh Tempo Pembayaran
+                            Nama Kreditur / PayLater
                           </label>
                           <input
-                            type="date"
-                            value={debtDueDateInput}
-                            onChange={(e) => setDebtDueDateInput(e.target.value)}
+                            type="text"
+                            placeholder="Contoh: GoPay Later, SpayLater, Kartu Kredit Mandiri, Teman"
+                            value={debtCreditorName}
+                            onChange={(e) => setDebtCreditorName(e.target.value)}
                             className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border text-xs"
                           />
                         </div>
 
-                        <div>
-                          <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
-                            Uang Muka / DP Sekarang (Rp)
-                          </label>
-                          <div className="relative flex items-center">
-                            <span className="absolute left-2.5 text-[11px] font-mono text-neutral-400">Rp</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                              Jatuh Tempo Pembayaran
+                            </label>
                             <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="0"
-                              value={debtDownPayment}
-                              onChange={(e) => setDebtDownPayment(formatCurrencyInput(e.target.value))}
-                              className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border text-xs font-mono"
+                              type="date"
+                              value={debtDueDateInput}
+                              onChange={(e) => setDebtDueDateInput(e.target.value)}
+                              className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border text-xs"
                             />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                              Uang Muka / DP Sekarang (Rp)
+                            </label>
+                            <div className="relative flex items-center">
+                              <span className="absolute left-2.5 text-[11px] font-mono text-neutral-400">Rp</span>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="0"
+                                value={debtDownPayment}
+                                onChange={(e) => setDebtDownPayment(formatCurrencyInput(e.target.value))}
+                                className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-white dark:bg-neutral-900 border text-xs font-mono"
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                )}
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddingTx(false)}
-                  className="px-3.5 py-2 text-xs font-semibold rounded-xl border"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-semibold rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
-                >
-                  Simpan Transaksi
-                </button>
-              </div>
-            </form>
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingTx(false);
+                      setEditingTx(null);
+                    }}
+                    className="px-3.5 py-2 text-xs font-semibold rounded-xl border cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-semibold rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 cursor-pointer"
+                  >
+                    {editingTx ? 'Simpan Perubahan' : 'Simpan Transaksi'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================= */}
       {/* MODAL: TAMBAH AKUN BARU                                   */}
@@ -2439,6 +2663,24 @@ export const FinanceTrackerView: React.FC = () => {
                   onChange={(e) => setAccNumber(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border font-mono"
                 />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1">Mapping Akun COA (Opsional)</label>
+                <select
+                  value={accCoaCode}
+                  onChange={(e) => setAccCoaCode(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border font-semibold"
+                >
+                  <option value="">Otomatis (Sesuai Tipe / Nama Akun)</option>
+                  {allCoaList
+                    .filter(c => c.category === 'asset')
+                    .map(coa => (
+                      <option key={coa.code} value={coa.code}>
+                        {coa.code} - {coa.name}
+                      </option>
+                    ))}
+                </select>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -2590,6 +2832,26 @@ export const FinanceTrackerView: React.FC = () => {
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm font-mono font-bold text-neutral-900 dark:text-neutral-100"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
+                  Mapping Akun COA (Aset)
+                </label>
+                <select
+                  value={editAccCoaCode}
+                  onChange={(e) => setEditAccCoaCode(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-900 dark:text-neutral-100"
+                >
+                  <option value="">Otomatis (Sesuai Tipe / Nama Akun)</option>
+                  {allCoaList
+                    .filter(c => c.category === 'asset')
+                    .map(coa => (
+                      <option key={coa.code} value={coa.code}>
+                        {coa.code} - {coa.name}
+                      </option>
+                    ))}
+                </select>
               </div>
 
               <div>
@@ -2945,13 +3207,11 @@ export const FinanceTrackerView: React.FC = () => {
                   }}
                   className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border font-semibold"
                 >
-                  <option value="Food & Dining">Food & Dining</option>
-                  <option value="Groceries">Groceries</option>
-                  <option value="Work & Software">Work & Software</option>
-                  <option value="Transport">Transport</option>
-                  <option value="Utilities">Utilities</option>
-                  <option value="Entertainment">Entertainment</option>
-                  <option value="Cicilan & Hutang">Cicilan & Hutang</option>
+                  {EXPENSE_CATEGORY_OPTIONS.map(cat => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
                   <option value="__custom__">+ Kategori Lainnya (Ketik Sendiri)</option>
                 </select>
               </div>
@@ -3018,13 +3278,17 @@ export const FinanceTrackerView: React.FC = () => {
       {/* ========================================================= */}
       {isAddingMyDebt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b">
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
               <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
                 <CreditCard className="w-4 h-4 text-rose-500" />
                 <span>Catat Hutang / Kewajiban Saya</span>
               </h3>
-              <button onClick={() => setIsAddingMyDebt(false)} className="text-neutral-400 hover:text-neutral-600">
+              <button
+                type="button"
+                onClick={() => setIsAddingMyDebt(false)}
+                className="text-neutral-400 hover:text-neutral-600 cursor-pointer"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -3038,36 +3302,46 @@ export const FinanceTrackerView: React.FC = () => {
                   placeholder="Contoh: GoPay Later, SpayLater, Bank Mandiri, Teman"
                   value={myDebtCreditor}
                   onChange={(e) => setMyDebtCreditor(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700"
                 />
               </div>
 
               <div>
-                <label className="block font-semibold mb-1">Keperluan / Deskripsi Barang</label>
+                <label className="block font-semibold mb-1">Keperluan / Deskripsi</label>
                 <input
                   type="text"
-                  placeholder="Contoh: Cicilan Laptop, Pinjaman Modal Kerja"
+                  placeholder="Contoh: Pinjaman Modal Kerja, Cicilan Laptop, Dana Talangan"
                   value={myDebtDesc}
                   onChange={(e) => setMyDebtDesc(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700"
                 />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1">Total Hutang (Rp)</label>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-xs font-mono text-neutral-400">Rp</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    placeholder="3.500.000"
+                    value={myDebtAmount}
+                    onChange={(e) => setMyDebtAmount(formatCurrencyInput(e.target.value))}
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 font-mono font-bold"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-semibold mb-1">Total Hutang (Rp)</label>
-                  <div className="relative flex items-center">
-                    <span className="absolute left-3 text-xs font-mono text-neutral-400">Rp</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      required
-                      placeholder="3.500.000"
-                      value={myDebtAmount}
-                      onChange={(e) => setMyDebtAmount(formatCurrencyInput(e.target.value))}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border font-mono font-bold"
-                    />
-                  </div>
+                  <label className="block font-semibold mb-1">Tanggal Pencatatan</label>
+                  <input
+                    type="date"
+                    value={myDebtIssuedDate}
+                    onChange={(e) => setMyDebtIssuedDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700"
+                  />
                 </div>
 
                 <div>
@@ -3076,22 +3350,69 @@ export const FinanceTrackerView: React.FC = () => {
                     type="date"
                     value={myDebtDueDate}
                     onChange={(e) => setMyDebtDueDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border"
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700"
                   />
                 </div>
+              </div>
+
+              {/* Pilihan Menambah Saldo Akun Apa */}
+              <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 space-y-2.5">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={myDebtAddToAccount}
+                    disabled={accounts.length === 0}
+                    onChange={(e) => setMyDebtAddToAccount(e.target.checked)}
+                    className="mt-0.5 rounded border-neutral-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <div>
+                    <span className="font-semibold text-neutral-900 dark:text-neutral-100 block">
+                      Dana hutang ini menambah saldo akun keuangan
+                    </span>
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                      Centang jika dana pinjaman masuk ke rekening bank, e-wallet, atau kas tunai Anda.
+                    </span>
+                  </div>
+                </label>
+
+                {accounts.length === 0 ? (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    Belum ada akun kas/bank terdaftar. Tambahkan akun di tab Akun & Saldo Awal jika ingin saldo bertambah otomatis.
+                  </p>
+                ) : myDebtAddToAccount && (
+                  <div>
+                    <label className="block font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
+                      Menambah Saldo Akun:
+                    </label>
+                    <select
+                      value={myDebtAccountId || accounts[0]?.id || ''}
+                      onChange={(e) => setMyDebtAccountId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-emerald-300 dark:border-emerald-800 font-semibold"
+                    >
+                      {accounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} (Saldo saat ini: Rp {(accountBalances[acc.id]?.currentBalance || 0).toLocaleString('id-ID')})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400 mt-1">
+                      Otomatis menambah saldo akun tersebut & menjurnal Debit Kas/Bank vs Kredit Hutang di General Ledger.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setIsAddingMyDebt(false)}
-                  className="px-3 py-1.5 rounded-xl border"
+                  className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold"
+                  className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold cursor-pointer"
                 >
                   Simpan Hutang
                 </button>

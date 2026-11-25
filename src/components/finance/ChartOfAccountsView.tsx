@@ -9,7 +9,8 @@ import {
 import {
   CoaLedgerSummary,
   AccountingEquationSummary,
-  generateBalanceSheetSummary
+  generateBalanceSheetSummary,
+  BASE_CHART_OF_ACCOUNTS
 } from '../../utils/accounting';
 import {
   BookOpen,
@@ -25,7 +26,9 @@ import {
   Download,
   Landmark,
   BarChart3,
-  Edit2
+  Edit2,
+  Plus,
+  RotateCcw
 } from 'lucide-react';
 
 interface ChartOfAccountsViewProps {
@@ -36,6 +39,9 @@ interface ChartOfAccountsViewProps {
   currencySymbol: string;
   onOpenAccountLedger: (acc: FinancialAccount) => void;
   accounts: FinancialAccount[];
+  customCoaAccounts?: ChartOfAccount[];
+  onUpsertCoa?: (coa: ChartOfAccount) => void;
+  onDeleteCustomCoa?: (code: string) => void;
   // Unified P&L & Balance Sheet props
   selectedMonth: string;
   onChangeMonth: (month: string) => void;
@@ -56,6 +62,9 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
   coaLedgers,
   accountingSummary,
   currencySymbol,
+  customCoaAccounts = [],
+  onUpsertCoa,
+  onDeleteCustomCoa,
   selectedMonth,
   onChangeMonth,
   availableMonths,
@@ -72,6 +81,95 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
   const [classFilter, setClassFilter] = useState<'all' | CoaClass>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCoaForDetail, setSelectedCoaForDetail] = useState<ChartOfAccount | null>(null);
+
+  // Add / Edit COA Modal state
+  const [isCoaModalOpen, setIsCoaModalOpen] = useState(false);
+  const [coaModalMode, setCoaModalMode] = useState<'add' | 'edit'>('add');
+  const [coaCodeInput, setCoaCodeInput] = useState('');
+  const [coaNameInput, setCoaNameInput] = useState('');
+  const [coaCategoryInput, setCoaCategoryInput] = useState<CoaClass>('expense');
+  const [coaSubCategoryInput, setCoaSubCategoryInput] = useState('Beban Operasional');
+  const [coaNormalBalanceInput, setCoaNormalBalanceInput] = useState<'debit' | 'credit'>('debit');
+  const [coaDescriptionInput, setCoaDescriptionInput] = useState('');
+  const [coaLinkedAccountIdInput, setCoaLinkedAccountIdInput] = useState<string | undefined>(undefined);
+  const [coaFormError, setCoaFormError] = useState<string | null>(null);
+
+  const openAddCoaModal = () => {
+    const defaultCategory: CoaClass = classFilter !== 'all' ? classFilter : 'expense';
+    const prefix =
+      defaultCategory === 'asset' ? '15'
+      : defaultCategory === 'liability' ? '23'
+      : defaultCategory === 'equity' ? '33'
+      : defaultCategory === 'revenue' ? '44'
+      : '55';
+    let num = 1;
+    let candidate = `${prefix}${String(num).padStart(2, '0')}`;
+    while (allCoaList.some(c => c.code === candidate) && num < 99) {
+      num += 1;
+      candidate = `${prefix}${String(num).padStart(2, '0')}`;
+    }
+
+    setCoaModalMode('add');
+    setCoaCodeInput(candidate);
+    setCoaNameInput('');
+    setCoaCategoryInput(defaultCategory);
+    setCoaSubCategoryInput(
+      defaultCategory === 'asset' ? 'Aset Lancar Lainnya'
+      : defaultCategory === 'liability' ? 'Kewajiban Jangka Pendek'
+      : defaultCategory === 'equity' ? 'Modal Pemilik'
+      : defaultCategory === 'revenue' ? 'Pendapatan Utama'
+      : 'Beban Operasional'
+    );
+    setCoaNormalBalanceInput(defaultCategory === 'asset' || defaultCategory === 'expense' ? 'debit' : 'credit');
+    setCoaDescriptionInput('');
+    setCoaLinkedAccountIdInput(undefined);
+    setCoaFormError(null);
+    setIsCoaModalOpen(true);
+  };
+
+  const openEditCoaModal = (coa: ChartOfAccount) => {
+    setCoaModalMode('edit');
+    setCoaCodeInput(coa.code);
+    setCoaNameInput(coa.name);
+    setCoaCategoryInput(coa.category);
+    setCoaSubCategoryInput(coa.subCategory);
+    setCoaNormalBalanceInput(coa.normalBalance);
+    setCoaDescriptionInput(coa.description || '');
+    setCoaLinkedAccountIdInput(coa.linkedAccountId);
+    setCoaFormError(null);
+    setIsCoaModalOpen(true);
+  };
+
+  const handleSaveCoaModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onUpsertCoa) return;
+    const cleanCode = coaCodeInput.trim();
+    const cleanName = coaNameInput.trim();
+    if (!cleanCode) {
+      setCoaFormError('Kode akun COA wajib diisi.');
+      return;
+    }
+    if (!cleanName) {
+      setCoaFormError('Nama akun COA wajib diisi.');
+      return;
+    }
+    if (coaModalMode === 'add' && allCoaList.some(c => c.code.toLowerCase() === cleanCode.toLowerCase())) {
+      setCoaFormError(`Kode akun "${cleanCode}" sudah ada. Gunakan kode unik lain atau edit akun tersebut.`);
+      return;
+    }
+
+    onUpsertCoa({
+      code: cleanCode,
+      name: cleanName,
+      category: coaCategoryInput,
+      subCategory: coaSubCategoryInput.trim() || 'Kustom',
+      normalBalance: coaNormalBalanceInput,
+      description: coaDescriptionInput.trim() || undefined,
+      linkedAccountId: coaLinkedAccountIdInput,
+      isCustom: true,
+    });
+    setIsCoaModalOpen(false);
+  };
 
   const filteredCoaList = useMemo(() => {
     return allCoaList.filter(coa => {
@@ -128,7 +226,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
       ...balanceSheet.liabilities.map(l => ['KEWAJIBAN', l.code, l.name, l.subCategory, String(l.balance)]),
       ['TOTAL KEWAJIBAN', '', '', '', String(balanceSheet.totalLiabilities)],
       ...balanceSheet.equity.map(e => ['EKUITAS', e.code, e.name, e.subCategory, String(e.balance)]),
-      ['EKUITAS', '3-9999', 'Laba / Rugi Tahun Berjalan (Net Income)', 'Laba Berjalan', String(balanceSheet.netIncome)],
+      ['EKUITAS', '3999', 'Laba / Rugi Tahun Berjalan (Net Income)', 'Laba Berjalan', String(balanceSheet.netIncome)],
       ['TOTAL KEWAJIBAN + EKUITAS', '', '', '', String(balanceSheet.totalLiabilitiesAndEquity)]
     ];
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -380,15 +478,28 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
               ))}
             </div>
 
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-              <input
-                type="text"
-                placeholder="Cari kode atau nama akun..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs w-56 focus:w-64 transition-all"
-              />
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input
+                  type="text"
+                  placeholder="Cari kode atau nama akun..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs w-52 focus:w-60 transition-all"
+                />
+              </div>
+
+              {onUpsertCoa && (
+                <button
+                  type="button"
+                  onClick={openAddCoaModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Tambah COA</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -403,7 +514,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                   <th className="py-2.5 px-3 text-right">Debit (Rp)</th>
                   <th className="py-2.5 px-3 text-right">Kredit (Rp)</th>
                   <th className="py-2.5 px-3 text-right">Saldo Akhir</th>
-                  <th className="py-2.5 px-3 text-center">Buku Besar</th>
+                  <th className="py-2.5 px-3 text-center">Aksi & Buku Besar</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60 font-mono">
@@ -412,6 +523,8 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                   const ending = ledger ? ledger.endingBalance : 0;
                   const hasMutations = (ledger?.mutationCount || 0) > 0;
                   const isDebitNormal = coa.normalBalance === 'debit';
+                  const hasCustomOverride = customCoaAccounts.some(c => c.code === coa.code);
+                  const isBaseCoa = BASE_CHART_OF_ACCOUNTS.some(b => b.code === coa.code);
 
                   return (
                     <tr
@@ -423,11 +536,16 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                       </td>
 
                       <td className="py-3 px-3 font-sans">
-                        <div className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                        <div className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5 flex-wrap">
                           <span>{coa.name}</span>
                           {coa.linkedAccountId && (
                             <span className="px-1.5 py-0.2 rounded text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 font-mono">
                               Akun Riil
+                            </span>
+                          )}
+                          {hasCustomOverride && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-mono">
+                              {isBaseCoa ? 'Diedit' : 'Kustom'}
                             </span>
                           )}
                         </div>
@@ -469,13 +587,38 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                       </td>
 
                       <td className="py-3 px-3 text-center font-sans">
-                        <button
-                          onClick={() => setSelectedCoaForDetail(coa)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-[11px] font-semibold transition-colors cursor-pointer"
-                        >
-                          <Eye className="w-3 h-3" />
-                          <span>Ledger {hasMutations ? `(${ledger?.mutationCount})` : ''}</span>
-                        </button>
+                        <div className="inline-flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCoaForDetail(coa)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-[11px] font-semibold transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Ledger {hasMutations ? `(${ledger?.mutationCount})` : ''}</span>
+                          </button>
+
+                          {onUpsertCoa && (
+                            <button
+                              type="button"
+                              onClick={() => openEditCoaModal(coa)}
+                              title="Edit Nama & Detail COA"
+                              className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-indigo-100 dark:hover:bg-indigo-950/60 text-neutral-600 dark:text-neutral-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          )}
+
+                          {hasCustomOverride && onDeleteCustomCoa && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteCustomCoa(coa.code)}
+                              title={isBaseCoa ? 'Kembalikan Nama COA ke Standar' : 'Hapus COA Kustom'}
+                              className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-rose-100 dark:hover:bg-rose-950/60 text-neutral-500 hover:text-rose-600 transition-colors cursor-pointer"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -755,7 +898,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                 <div className="px-4 py-2.5 flex items-center justify-between text-xs gap-2 bg-indigo-50/40 dark:bg-indigo-950/20">
                   <div className="min-w-0">
                     <p className="font-semibold text-neutral-900 dark:text-neutral-100">
-                      <span className="font-mono text-indigo-600 dark:text-indigo-400 mr-1.5">3-9999</span>
+                      <span className="font-mono text-indigo-600 dark:text-indigo-400 mr-1.5">3999</span>
                       Laba / Rugi Periode Berjalan (Net Income)
                     </p>
                     <p className="text-[10px] text-neutral-400">Selisih Pendapatan & Beban</p>
@@ -1045,6 +1188,157 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                 Tutup Buku Besar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL: TAMBAH / EDIT AKUN COA */}
+      {isCoaModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs animate-in fade-in"
+          onClick={() => setIsCoaModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-500" />
+                <span>{coaModalMode === 'add' ? 'Tambah Akun COA Baru' : `Edit Akun COA (${coaCodeInput})`}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsCoaModalOpen(false)}
+                className="text-neutral-400 hover:text-neutral-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {coaFormError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                {coaFormError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveCoaModal} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                    Kode Akun COA
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    disabled={coaModalMode === 'edit'}
+                    value={coaCodeInput}
+                    onChange={(e) => setCoaCodeInput(e.target.value)}
+                    placeholder="Contoh: 5501"
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 font-mono font-bold disabled:opacity-60"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                    Klasifikasi
+                  </label>
+                  <select
+                    value={coaCategoryInput}
+                    disabled={coaModalMode === 'edit' && Boolean(coaLinkedAccountIdInput)}
+                    onChange={(e) => {
+                      const nextCat = e.target.value as CoaClass;
+                      setCoaCategoryInput(nextCat);
+                      if (coaModalMode === 'add') {
+                        setCoaNormalBalanceInput(
+                          nextCat === 'asset' || nextCat === 'expense' ? 'debit' : 'credit'
+                        );
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 font-semibold disabled:opacity-60"
+                  >
+                    <option value="asset">1-Aset</option>
+                    <option value="liability">2-Kewajiban</option>
+                    <option value="equity">3-Ekuitas</option>
+                    <option value="revenue">4-Pendapatan</option>
+                    <option value="expense">5-Beban</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                  Nama Akun Standar
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={coaNameInput}
+                  onChange={(e) => setCoaNameInput(e.target.value)}
+                  placeholder="Contoh: Beban Marketing & Iklan Digital"
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                    Sub-Kategori
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={coaSubCategoryInput}
+                    onChange={(e) => setCoaSubCategoryInput(e.target.value)}
+                    placeholder="Contoh: Beban Pemasaran"
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                    Saldo Normal
+                  </label>
+                  <select
+                    value={coaNormalBalanceInput}
+                    disabled={coaModalMode === 'edit' && Boolean(coaLinkedAccountIdInput)}
+                    onChange={(e) => setCoaNormalBalanceInput(e.target.value as 'debit' | 'credit')}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 font-semibold disabled:opacity-60"
+                  >
+                    <option value="debit">Debit (+)</option>
+                    <option value="credit">Kredit (+)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                  Deskripsi / Keterangan (Opsional)
+                </label>
+                <input
+                  type="text"
+                  value={coaDescriptionInput}
+                  onChange={(e) => setCoaDescriptionInput(e.target.value)}
+                  placeholder="Penjelasan penggunaan akun COA ini..."
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCoaModalOpen(false)}
+                  className="px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-700 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold cursor-pointer"
+                >
+                  {coaModalMode === 'add' ? 'Tambah COA' : 'Simpan Perubahan COA'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -22,6 +22,7 @@ const TAB_TITLES: Record<NavigationTab, { title: string; subtitle: string }> = {
   finance: { title: 'Keuangan, Piutang & Invoice', subtitle: 'Pencatatan arus kas, kas/non-kas, dan penagihan' },
   reimburse: { title: 'Reimburse Proyek (WD / WE)', subtitle: 'Klaim proyek dengan kalkulasi otomatis tarif Excel' },
   removebg: { title: 'Remove Background Studio', subtitle: 'Hapus latar belakang gambar instan & studio backdrop' },
+  converter: { title: 'Image Converter (PNG ⇄ JPG)', subtitle: 'Konversi format PNG, JPG, dan WebP secara instan & batch' },
   notes: { title: 'Catatan & Knowledge Base', subtitle: 'Dokumentasi materi, ide, dan referensi' },
   pdftools: { title: 'PDF Utilities & E-Signature', subtitle: 'Konversi gambar, kompresi ukuran file, dan tanda tangan digital' },
   barcode: { title: 'QR & Barcode Studio', subtitle: 'Generator & pemindai barcode / QR code' },
