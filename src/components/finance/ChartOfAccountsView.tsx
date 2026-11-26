@@ -46,6 +46,9 @@ interface ChartOfAccountsViewProps {
   selectedMonth: string;
   onChangeMonth: (month: string) => void;
   availableMonths: string[];
+  cutoffDay?: number;
+  periodRangeLabel?: string;
+  formatMonthLabel?: (ym: string) => string;
   monthlyIncome: number;
   monthlyExpense: number;
   monthlyProfitLoss: number;
@@ -68,6 +71,9 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
   selectedMonth,
   onChangeMonth,
   availableMonths,
+  cutoffDay = 26,
+  periodRangeLabel,
+  formatMonthLabel,
   monthlyIncome,
   monthlyExpense,
   monthlyProfitLoss,
@@ -931,17 +937,19 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                 Laporan Laba-Rugi (P&L) & Kontrol Overbudget
               </h4>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Analisis pendapatan, pengeluaran operasional, surplus/defisit, dan batas anggaran kategori per bulan.
+                Analisis pendapatan, pengeluaran operasional, surplus/defisit, dan batas anggaran sesuai cut-off tanggal {cutoffDay} tiap bulan.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <select
                 value={selectedMonth}
                 onChange={(e) => onChangeMonth(e.target.value)}
-                className="px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs font-mono font-semibold cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs font-semibold cursor-pointer"
               >
                 {availableMonths.map(m => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m}>
+                    {formatMonthLabel ? formatMonthLabel(m) : m}
+                  </option>
                 ))}
               </select>
               {onExportPnlCsv && (
@@ -959,7 +967,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="p-4 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 space-y-1">
               <div className="flex items-center justify-between text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-                <span>Pendapatan ({selectedMonth})</span>
+                <span>Pendapatan ({periodRangeLabel || selectedMonth})</span>
                 <TrendingUp className="w-4 h-4" />
               </div>
               <p className="text-lg font-bold font-mono text-emerald-950 dark:text-emerald-100 tabular-nums">
@@ -969,7 +977,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
 
             <div className="p-4 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 space-y-1">
               <div className="flex items-center justify-between text-xs text-rose-600 dark:text-rose-400 font-semibold">
-                <span>Pengeluaran ({selectedMonth})</span>
+                <span>Pengeluaran ({periodRangeLabel || selectedMonth})</span>
                 <TrendingDown className="w-4 h-4" />
               </div>
               <p className="text-lg font-bold font-mono text-rose-950 dark:text-rose-100 tabular-nums">
@@ -979,7 +987,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
 
             <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/50 space-y-1">
               <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 block">
-                Surplus / Defisit Bulan Ini
+                Surplus / Defisit Periode Ini
               </span>
               <p className={`text-lg font-bold font-mono tabular-nums ${
                 monthlyProfitLoss >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
@@ -993,10 +1001,10 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h5 className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-                  Realisasi Belanja ({selectedMonth}) vs Batas Anggaran per Kategori
+                  Realisasi Belanja ({periodRangeLabel || selectedMonth}) vs Batas Anggaran per Kategori
                 </h5>
                 <p className="text-[11px] text-neutral-400">
-                  Realisasi otomatis reset ke Rp 0 setiap ganti bulan tanpa menghapus riwayat transaksi.
+                  Realisasi otomatis reset ke Rp 0 setiap tanggal {cutoffDay} pagi tanpa menghapus riwayat transaksi.
                 </p>
               </div>
               {onAddBudget && (
@@ -1012,7 +1020,7 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {allPnlCategories.length === 0 ? (
                 <div className="md:col-span-2 py-8 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl">
-                  Belum ada batas anggaran atau pengeluaran pada bulan {selectedMonth}.
+                  Belum ada batas anggaran atau pengeluaran pada periode {periodRangeLabel || selectedMonth}.
                 </div>
               ) : (
                 allPnlCategories.map(cat => {

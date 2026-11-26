@@ -74,6 +74,12 @@ function sanitizeNum(val: unknown, fallback = 0, min = -1e12, max = 1e12): numbe
   return Math.min(max, Math.max(min, n));
 }
 
+function sanitizeCutoffDay(val: unknown, fallback = 26): number {
+  const n = Math.floor(Number(val));
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(31, Math.max(1, n));
+}
+
 function sanitizeId(val: unknown, prefix: string): string {
   const raw = typeof val === 'string' ? val.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 128) : '';
   return raw.length > 0 ? raw : `${prefix}-${Date.now()}`;
@@ -371,6 +377,7 @@ workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: Auth
               avatarUrl: profileRows[0].avatarUrl,
               currencySymbol: profileRows[0].currencySymbol,
               monthlyBudget: Number(profileRows[0].monthlyBudget) || 0,
+              monthlyCutoffDay: sanitizeCutoffDay(profileRows[0].monthlyCutoffDay, 26),
               bankAccountDetails: profileRows[0].bankAccountDetails || '',
               paymentQrDataUrl: profileRows[0].paymentQrDataUrl || undefined,
             }
@@ -580,6 +587,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
             avatarUrl: sanitizeOptImage(p.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg',
             currencySymbol: sanitizeStr(p.currencySymbol, 10, 'Rp') || 'Rp',
             monthlyBudget: sanitizeNum(p.monthlyBudget, 0, 0),
+            monthlyCutoffDay: sanitizeCutoffDay(p.monthlyCutoffDay, 26),
             bankAccountDetails: sanitizeOptStr(p.bankAccountDetails, 1000),
             paymentQrDataUrl: sanitizeOptImage(p.paymentQrDataUrl),
             updatedAt: new Date(),
@@ -592,6 +600,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
               avatarUrl: sanitizeOptImage(p.avatarUrl) || '/src/assets/images/user_avatar_1793517278515.jpg',
               currencySymbol: sanitizeStr(p.currencySymbol, 10, 'Rp') || 'Rp',
               monthlyBudget: sanitizeNum(p.monthlyBudget, 0, 0),
+              monthlyCutoffDay: sanitizeCutoffDay(p.monthlyCutoffDay, 26),
               bankAccountDetails: sanitizeOptStr(p.bankAccountDetails, 1000),
               paymentQrDataUrl: sanitizeOptImage(p.paymentQrDataUrl),
               updatedAt: new Date(),
@@ -942,6 +951,7 @@ workspaceRouter.put('/workspace/profile', requireAuth, requireDatabase, async (r
       avatarUrl: p.avatarUrl !== undefined ? (sanitizeOptImage(p.avatarUrl) || cur?.avatarUrl || '/src/assets/images/user_avatar_1793517278515.jpg') : (cur?.avatarUrl || '/src/assets/images/user_avatar_1793517278515.jpg'),
       currencySymbol: p.currencySymbol !== undefined ? sanitizeStr(p.currencySymbol, 10, 'Rp') : (cur?.currencySymbol || 'Rp'),
       monthlyBudget: p.monthlyBudget !== undefined ? sanitizeNum(p.monthlyBudget, 0, 0) : (cur?.monthlyBudget ?? 0),
+      monthlyCutoffDay: p.monthlyCutoffDay !== undefined ? sanitizeCutoffDay(p.monthlyCutoffDay, 26) : sanitizeCutoffDay(cur?.monthlyCutoffDay, 26),
       bankAccountDetails: p.bankAccountDetails !== undefined ? sanitizeOptStr(p.bankAccountDetails, 1000) : (cur?.bankAccountDetails ?? null),
       paymentQrDataUrl: p.paymentQrDataUrl !== undefined ? sanitizeOptImage(p.paymentQrDataUrl) : (cur?.paymentQrDataUrl ?? null),
       updatedAt: new Date(),
@@ -955,6 +965,7 @@ workspaceRouter.put('/workspace/profile', requireAuth, requireDatabase, async (r
         avatarUrl: values.avatarUrl,
         currencySymbol: values.currencySymbol,
         monthlyBudget: values.monthlyBudget,
+        monthlyCutoffDay: values.monthlyCutoffDay,
         bankAccountDetails: values.bankAccountDetails,
         paymentQrDataUrl: values.paymentQrDataUrl,
         updatedAt: values.updatedAt,

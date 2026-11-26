@@ -250,6 +250,7 @@ export interface UserProfile {
   avatarUrl: string;
   currencySymbol: string;
   monthlyBudget: number;
+  monthlyCutoffDay?: number; // 1..31, default 26 (tanggal gajian / cut-off bulanan)
   bankAccountDetails?: string; // for Invoices
   paymentQrDataUrl?: string; // Default QR Code image for WA & PDF invoices
 }

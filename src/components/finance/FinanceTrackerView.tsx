@@ -1,8 +1,16 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import { useApp } from '../../context/AppContext';
 import { compressImageDataUrl } from '../../utils/imageCompress';
 import { getDebtLineItems } from '../../utils/debtItems';
+import {
+  normalizeCutoffDay,
+  getLocalTodayYmd,
+  getPeriodKeyForDate,
+  isDateInPeriod,
+  formatPeriodLabel,
+  formatPeriodRangeText
+} from '../../utils/billingPeriod';
 import {
   FinanceTransaction,
   DebtReceivable,
@@ -135,6 +143,7 @@ export const FinanceTrackerView: React.FC = () => {
     categoryBudgets,
     updateCategoryBudget,
     profile,
+    updateProfile,
     appBranding,
     showToast
   } = useApp();
@@ -292,12 +301,16 @@ export const FinanceTrackerView: React.FC = () => {
     return selected.length > 0 ? selected : [invoiceModalDebt];
   }, [debtorSiblingDebts, selectedCombinedDebtIds, invoiceModalDebt]);
 
-  // Month selector for Monthly Budget & General Ledger P&L
-  const currentMonthStr = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }, []);
+  // Month / Payday Cut-off selector for Monthly Budget & General Ledger P&L
+  const cutoffDay = normalizeCutoffDay(profile.monthlyCutoffDay);
+  const currentMonthStr = useMemo(
+    () => getPeriodKeyForDate(getLocalTodayYmd(), cutoffDay),
+    [cutoffDay]
+  );
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
+  useEffect(() => {
+    setSelectedMonth(currentMonthStr);
+  }, [currentMonthStr]);
 
   // Edit / Add category budget modal
   const [editingBudgetCategory, setEditingBudgetCategory] = useState<string | null>(null);
@@ -380,20 +393,20 @@ export const FinanceTrackerView: React.FC = () => {
   // 4. Net Worth (Total Saldo + Piutang - Hutang Saya)
   const netWorth = totalCombinedBalance + totalReceivables - totalMyDebtsUnpaid;
 
-  // 5. Available months & Monthly P&L (Active non-voided transactions)
+  // 5. Available periods & Monthly P&L (Active non-voided transactions within cut-off cycle)
   const availableMonths = useMemo(() => {
-    const now = new Date();
-    const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const set = new Set<string>([cur, selectedMonth]);
+    const set = new Set<string>([currentMonthStr, selectedMonth]);
     activeTransactions.forEach(t => {
-      if (t.date && t.date.length >= 7) {
-        set.add(t.date.slice(0, 7));
+      if (t.date && t.date.length >= 10) {
+        set.add(getPeriodKeyForDate(t.date, cutoffDay));
       }
     });
     return Array.from(set).sort((a, b) => b.localeCompare(a));
-  }, [activeTransactions, selectedMonth]);
+  }, [activeTransactions, selectedMonth, currentMonthStr, cutoffDay]);
 
-  const monthlyTransactions = activeTransactions.filter(t => t.date.startsWith(selectedMonth));
+  const monthlyTransactions = activeTransactions.filter(t =>
+    isDateInPeriod(t.date, selectedMonth, cutoffDay)
+  );
   let monthlyIncome = 0;
   let monthlyExpense = 0;
   const monthlyCategoryExpenses: Record<string, number> = {};
@@ -420,12 +433,9 @@ export const FinanceTrackerView: React.FC = () => {
   monthlyExpense = Math.max(0, monthlyExpense);
   const monthlyProfitLoss = monthlyIncome - monthlyExpense;
 
-  const formatMonthLabel = (ym: string) => {
-    const [y, m] = ym.split('-').map(Number);
-    if (!y || !m) return ym;
-    const label = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(y, m - 1, 1));
-    return ym === currentMonthStr ? `${label} (Bulan Ini)` : label;
-  };
+  const formatMonthLabel = (ym: string) =>
+    formatPeriodLabel(ym, cutoffDay, currentMonthStr);
+  const selectedPeriodRangeText = formatPeriodRangeText(selectedMonth, cutoffDay);
 
   const budgetCategoriesList = useMemo(() => {
     const set = new Set<string>();
@@ -1117,7 +1127,8 @@ export const FinanceTrackerView: React.FC = () => {
   // Export Monthly P&L CSV
   const handleExportPnlCsv = () => {
     const rows = [
-      ['LAPORAN LABA RUGI (P&L) BULAN', selectedMonth],
+      ['LAPORAN LABA RUGI (P&L) PERIODE', selectedPeriodRangeText],
+      ['Cut-off Bulanan', `Tanggal ${cutoffDay}`],
       ['Total Pemasukan', monthlyIncome.toString()],
       ['Total Pengeluaran', monthlyExpense.toString()],
       ['Surplus / Defisit', monthlyProfitLoss.toString()],
@@ -1143,10 +1154,10 @@ export const FinanceTrackerView: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Laporan_PnL_${selectedMonth}.csv`;
+    a.download = `Laporan_PnL_${selectedMonth}_cutoff${cutoffDay}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast(`Laporan P&L bulan ${selectedMonth} berhasil diekspor!`, 'success');
+    showToast(`Laporan P&L periode ${selectedPeriodRangeText} berhasil diekspor!`, 'success');
   };
 
   return (
@@ -1336,11 +1347,27 @@ export const FinanceTrackerView: React.FC = () => {
                   <span>Realisasi Belanja & Sisa Budget Per Kategori ({formatMonthLabel(selectedMonth)})</span>
                 </h3>
                 <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
-                  Realisasi belanja otomatis reset menjadi Rp 0 di awal bulan baru, sementara seluruh transaksi lama tetap tersimpan aman di riwayat.
+                  Realisasi belanja otomatis reset menjadi Rp 0 setiap tanggal {cutoffDay} pagi (gajian), sementara seluruh transaksi lama tetap tersimpan aman di riwayat.
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <select
+                  value={cutoffDay}
+                  onChange={(e) => {
+                    const nextDay = normalizeCutoffDay(Number(e.target.value));
+                    updateProfile({ monthlyCutoffDay: nextDay });
+                    showToast(`Cut-off bulanan diubah ke tanggal ${nextDay}`, 'success');
+                  }}
+                  title="Tanggal Cut-off Bulanan (Gajian)"
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs font-semibold cursor-pointer"
+                >
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                    <option key={day} value={day}>
+                      Cut-off Tgl {day}
+                    </option>
+                  ))}
+                </select>
                 <select
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(e.target.value)}
@@ -1370,13 +1397,13 @@ export const FinanceTrackerView: React.FC = () => {
             {totalConfiguredMonthlyBudget > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800">
-                  <span className="text-[11px] text-neutral-500 block">Total Batas Anggaran / Bln</span>
+                  <span className="text-[11px] text-neutral-500 block">Total Batas Anggaran / Siklus</span>
                   <span className="text-sm font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">
                     {profile.currencySymbol} {totalConfiguredMonthlyBudget.toLocaleString('id-ID')}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800">
-                  <span className="text-[11px] text-neutral-500 block">Realisasi Terpakai ({selectedMonth})</span>
+                  <span className="text-[11px] text-neutral-500 block">Realisasi Terpakai ({selectedPeriodRangeText})</span>
                   <span className="text-sm font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400">
                     {profile.currencySymbol} {totalBudgetedSpentThisMonth.toLocaleString('id-ID')}
                   </span>
@@ -1387,7 +1414,7 @@ export const FinanceTrackerView: React.FC = () => {
                     : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50'
                 }`}>
                   <span className="text-[11px] text-neutral-500 block">
-                    {totalRemainingMonthlyBudget >= 0 ? 'Sisa Budget Bulan Ini' : 'Total Overbudget Bulan Ini'}
+                    {totalRemainingMonthlyBudget >= 0 ? 'Sisa Budget Periode Ini' : 'Total Overbudget Periode Ini'}
                   </span>
                   <span className={`text-sm font-bold font-mono tabular-nums ${
                     totalRemainingMonthlyBudget >= 0
@@ -1404,7 +1431,7 @@ export const FinanceTrackerView: React.FC = () => {
             {budgetCategoriesList.length === 0 ? (
               <div className="py-8 text-center text-neutral-400 space-y-2 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl">
                 <p className="text-xs">
-                  Belum ada batas anggaran atau realisasi pengeluaran pada bulan {formatMonthLabel(selectedMonth)}.
+                  Belum ada batas anggaran atau realisasi pengeluaran pada periode {formatMonthLabel(selectedMonth)}.
                 </p>
                 <button
                   type="button"
@@ -1911,6 +1938,9 @@ export const FinanceTrackerView: React.FC = () => {
           selectedMonth={selectedMonth}
           onChangeMonth={setSelectedMonth}
           availableMonths={availableMonths}
+          cutoffDay={cutoffDay}
+          periodRangeLabel={selectedPeriodRangeText}
+          formatMonthLabel={formatMonthLabel}
           monthlyIncome={monthlyIncome}
           monthlyExpense={monthlyExpense}
           monthlyProfitLoss={monthlyProfitLoss}
@@ -3137,7 +3167,7 @@ export const FinanceTrackerView: React.FC = () => {
                   />
                 </div>
                 <p className="text-[11px] text-neutral-400 mt-1">
-                  Berlaku setiap bulan (realisasi otomatis reset di tanggal 1 tiap bulan).
+                  Berlaku setiap siklus (realisasi otomatis reset setiap tanggal {cutoffDay} pagi).
                 </p>
               </div>
 
@@ -3249,7 +3279,7 @@ export const FinanceTrackerView: React.FC = () => {
                   />
                 </div>
                 <p className="text-[11px] text-neutral-400 mt-1">
-                  Realisasi belanja akan ter-reset otomatis tiap bulan baru tanpa menghapus riwayat transaksi.
+                  Realisasi belanja akan ter-reset otomatis setiap tanggal {cutoffDay} pagi tanpa menghapus riwayat transaksi.
                 </p>
               </div>
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { buildXlsxBlob } from '../../utils/xlsxExport';
 import {
@@ -9,7 +9,9 @@ import {
   FileSpreadsheet,
   X,
   RotateCcw,
-  Calendar
+  Calendar,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 const getLocalToday = () => new Date().toLocaleDateString('en-CA');
@@ -77,6 +79,10 @@ export const LogbookView: React.FC = () => {
   const [startFilterInput, setStartFilterInput] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
   const [endFilterInput, setEndFilterInput] = useState('');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(5);
 
   const datePickerRef = useRef<HTMLInputElement>(null);
   const startPickerRef = useRef<HTMLInputElement>(null);
@@ -157,6 +163,7 @@ export const LogbookView: React.FC = () => {
         description: description.trim(),
         status: 'Completed'
       });
+      setCurrentPage(1);
     }
 
     setDescription('');
@@ -184,6 +191,42 @@ export const LogbookView: React.FC = () => {
       })
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [logbookEntries, startDateFilter, endDateFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [startDateFilter, endDateFilter, itemsPerPage]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedEntries = useMemo(() => {
+    const startIdx = (safeCurrentPage - 1) * itemsPerPage;
+    return filteredEntries.slice(startIdx, startIdx + itemsPerPage);
+  }, [filteredEntries, safeCurrentPage, itemsPerPage]);
+
+  const pageNumbers = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const pages: (number | 'ellipsis-left' | 'ellipsis-right')[] = [1];
+    const start = Math.max(2, safeCurrentPage - 1);
+    const end = Math.min(totalPages - 1, safeCurrentPage + 1);
+
+    if (start > 2) pages.push('ellipsis-left');
+    for (let p = start; p <= end; p++) pages.push(p);
+    if (end < totalPages - 1) pages.push('ellipsis-right');
+    pages.push(totalPages);
+    return pages;
+  }, [totalPages, safeCurrentPage]);
+
+  const startItemIndex = filteredEntries.length === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1;
+  const endItemIndex = Math.min(safeCurrentPage * itemsPerPage, filteredEntries.length);
 
   // Export genuine XLSX with clean separated columns: No | Tanggal | Detail Kerjaan
   const handleExportXLSX = () => {
@@ -452,10 +495,32 @@ export const LogbookView: React.FC = () => {
           </div>
 
           {/* Logbook Entries List */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
-              Riwayat Logbook Harian ({filteredEntries.length})
-            </h3>
+          <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
+                Riwayat Logbook Harian ({filteredEntries.length})
+              </h3>
+
+              {filteredEntries.length > 0 && (
+                <div className="flex items-center gap-2 text-xs">
+                  <label htmlFor="logbook-per-page" className="text-neutral-500 dark:text-neutral-400">
+                    Tampilkan:
+                  </label>
+                  <select
+                    id="logbook-per-page"
+                    value={itemsPerPage}
+                    onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                    className="px-2.5 py-1 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-semibold text-neutral-800 dark:text-neutral-200 cursor-pointer"
+                  >
+                    {[5, 10, 20, 50].map((size) => (
+                      <option key={size} value={size}>
+                        {size} / halaman
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
 
             {filteredEntries.length === 0 ? (
               <div className="py-12 text-center text-neutral-400 space-y-2">
@@ -463,55 +528,119 @@ export const LogbookView: React.FC = () => {
                 <p className="text-xs">Belum ada catatan logbook pada periode ini.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {filteredEntries.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`p-4 rounded-xl border transition-colors flex flex-col sm:flex-row sm:items-start justify-between gap-3 ${
-                      editingId === item.id
-                        ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
-                        : 'bg-neutral-50 dark:bg-neutral-800/40 border-neutral-200 dark:border-neutral-800'
-                    }`}
-                  >
-                    <div className="space-y-2 min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-mono">
-                          {isoToDmy(item.date)}
-                        </span>
-                        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                          {formatDisplayDate(item.date)}
-                        </span>
+              <>
+                <div className="space-y-3">
+                  {paginatedEntries.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`p-4 rounded-xl border transition-colors flex flex-col sm:flex-row sm:items-start justify-between gap-3 ${
+                        editingId === item.id
+                          ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
+                          : 'bg-neutral-50 dark:bg-neutral-800/40 border-neutral-200 dark:border-neutral-800'
+                      }`}
+                    >
+                      <div className="space-y-2 min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-mono">
+                            {isoToDmy(item.date)}
+                          </span>
+                          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                            {formatDisplayDate(item.date)}
+                          </span>
+                        </div>
+
+                        <p className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 font-sans whitespace-pre-line leading-relaxed">
+                          {item.description}
+                        </p>
                       </div>
 
-                      <p className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 font-sans whitespace-pre-line leading-relaxed">
-                        {item.description}
-                      </p>
+                      <div className="flex items-center gap-1 self-end sm:self-start shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(item.id, item.date, item.description)}
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-indigo-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                          title="Edit Catatan"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editingId === item.id) handleCancelEdit();
+                            deleteLogbookEntry(item.id);
+                          }}
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                          title="Hapus Catatan"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
+                  ))}
+                </div>
 
-                    <div className="flex items-center gap-1 self-end sm:self-start shrink-0">
+                {/* Pagination Bar */}
+                <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <p className="text-neutral-500 dark:text-neutral-400 tabular-nums">
+                    Menampilkan <span className="font-semibold text-neutral-800 dark:text-neutral-200">{startItemIndex}–{endItemIndex}</span> dari{' '}
+                    <span className="font-semibold text-neutral-800 dark:text-neutral-200">{filteredEntries.length}</span> catatan
+                  </p>
+
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => handleStartEdit(item.id, item.date, item.description)}
-                        className="p-1.5 rounded-lg text-neutral-400 hover:text-indigo-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                        title="Edit Catatan"
+                        disabled={safeCurrentPage <= 1}
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+                        title="Halaman Sebelumnya"
                       >
-                        <Pencil className="w-4 h-4" />
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>Prev</span>
                       </button>
+
+                      {pageNumbers.map((pageItem) => {
+                        if (typeof pageItem !== 'number') {
+                          return (
+                            <span
+                              key={pageItem}
+                              className="px-1.5 text-neutral-400 select-none"
+                            >
+                              ...
+                            </span>
+                          );
+                        }
+                        const isActive = pageItem === safeCurrentPage;
+                        return (
+                          <button
+                            key={pageItem}
+                            type="button"
+                            onClick={() => setCurrentPage(pageItem)}
+                            className={`min-w-[30px] h-7 px-2 rounded-lg font-mono font-semibold transition-colors cursor-pointer ${
+                              isActive
+                                ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-xs'
+                                : 'border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                            }`}
+                          >
+                            {pageItem}
+                          </button>
+                        );
+                      })}
+
                       <button
                         type="button"
-                        onClick={() => {
-                          if (editingId === item.id) handleCancelEdit();
-                          deleteLogbookEntry(item.id);
-                        }}
-                        className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                        title="Hapus Catatan"
+                        disabled={safeCurrentPage >= totalPages}
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+                        title="Halaman Berikutnya"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <span>Next</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>

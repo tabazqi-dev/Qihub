@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { useApp } from '../../context/AppContext';
 import { compressImageDataUrl } from '../../utils/imageCompress';
 import { sanitizeSafeImageSrc } from '../../utils/debtItems';
+import { normalizeCutoffDay } from '../../utils/billingPeriod';
 import {
   X,
   Download,
@@ -54,6 +55,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [appLogoUrl, setAppLogoUrl] = useState(appBranding.appLogoUrl || '');
   const [currencySymbol, setCurrencySymbol] = useState(profile.currencySymbol);
   const [monthlyBudget, setMonthlyBudget] = useState(profile.monthlyBudget.toString());
+  const [monthlyCutoffDay, setMonthlyCutoffDay] = useState<number>(() => normalizeCutoffDay(profile.monthlyCutoffDay));
   const [bankAccountDetails, setBankAccountDetails] = useState(profile.bankAccountDetails || '');
   const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl);
   const [paymentQrDataUrl, setPaymentQrDataUrl] = useState(profile.paymentQrDataUrl || '');
@@ -84,6 +86,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setAppLogoUrl(appBranding.appLogoUrl || '');
       setCurrencySymbol(profile.currencySymbol);
       setMonthlyBudget(String(profile.monthlyBudget || 0));
+      setMonthlyCutoffDay(normalizeCutoffDay(profile.monthlyCutoffDay));
       setBankAccountDetails(profile.bankAccountDetails || '');
       setAvatarUrl(profile.avatarUrl);
       setPaymentQrDataUrl(profile.paymentQrDataUrl || '');
@@ -120,6 +123,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       title: title.trim(),
       currencySymbol: currencySymbol.trim() || 'Rp',
       monthlyBudget: numericBudget,
+      monthlyCutoffDay: normalizeCutoffDay(monthlyCutoffDay),
       bankAccountDetails: bankAccountDetails.trim(),
       avatarUrl: avatarUrl.trim() || profile.avatarUrl,
       paymentQrDataUrl: paymentQrDataUrl.trim() || undefined
@@ -683,6 +687,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   className="w-full px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100 font-mono tabular-nums"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                Tanggal Cut-off Bulanan (Gajian / Reset Anggaran)
+              </label>
+              <select
+                value={monthlyCutoffDay}
+                onChange={(e) => setMonthlyCutoffDay(normalizeCutoffDay(Number(e.target.value)))}
+                className="w-full px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-neutral-100 font-semibold cursor-pointer"
+              >
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                  <option key={day} value={day}>
+                    Tanggal {day} {day === 26 ? '(Default Gajian)' : day === 1 ? '(Awal Bulan Kalender)' : 'tiap bulan'}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
+                Periode berjalan dihitung mulai tanggal {monthlyCutoffDay} pagi sampai sehari sebelum tanggal {monthlyCutoffDay} bulan berikutnya (riwayat transaksi lama tetap aman).
+              </p>
             </div>
 
             <div>

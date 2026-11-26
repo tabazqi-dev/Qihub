@@ -90,6 +90,7 @@ export const qhubProfiles = pgTable('qhub_profiles', {
   appLogoUrl: text('app_logo_url'),
   currencySymbol: text('currency_symbol').notNull().default('Rp'),
   monthlyBudget: doublePrecision('monthly_budget').notNull().default(0),
+  monthlyCutoffDay: integer('monthly_cutoff_day').notNull().default(26),
   bankAccountDetails: text('bank_account_details'),
   paymentQrDataUrl: text('payment_qr_data_url'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

@@ -183,6 +183,7 @@ const DEFAULT_PROFILE: UserProfile = {
   avatarUrl: DEFAULT_AVATAR_URL,
   currencySymbol: 'Rp',
   monthlyBudget: 0,
+  monthlyCutoffDay: 26,
   bankAccountDetails: '',
   paymentQrDataUrl: undefined,
 };
@@ -528,6 +529,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         avatarUrl: sanitizeSafeImageSrc(ws.profile.avatarUrl) || DEFAULT_AVATAR_URL,
         currencySymbol: ws.profile.currencySymbol || 'Rp',
         monthlyBudget: Number(ws.profile.monthlyBudget) || 0,
+        monthlyCutoffDay: Math.min(31, Math.max(1, Math.floor(Number(ws.profile.monthlyCutoffDay) || 26))),
         bankAccountDetails: ws.profile.bankAccountDetails || '',
         paymentQrDataUrl: sanitizeSafeImageSrc(ws.profile.paymentQrDataUrl),
       });
@@ -2179,7 +2181,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const importDataJSON = (jsonString: string): boolean => {
     try {
       const data = JSON.parse(jsonString);
-      if (data.profile) setProfile(data.profile);
+      if (data.profile) {
+        setProfile({
+          ...DEFAULT_PROFILE,
+          ...data.profile,
+          monthlyCutoffDay: Math.min(31, Math.max(1, Math.floor(Number(data.profile.monthlyCutoffDay) || 26))),
+        });
+      }
       if (Array.isArray(data.accounts)) setAccounts(data.accounts);
       if (Array.isArray(data.todos)) setTodos(data.todos);
       if (Array.isArray(data.transactions)) setTransactions(data.transactions);
