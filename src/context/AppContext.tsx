@@ -9,6 +9,7 @@ import {
 import { auth, googleProvider } from '../firebase';
 import { isContraVoidTransaction, BASE_CHART_OF_ACCOUNTS, inferLiabilityCoaCode } from '../utils/accounting';
 import { getDebtLineItems, sanitizeSafeImageSrc } from '../utils/debtItems';
+import { findClosedPeriodForDate } from '../utils/billingPeriod';
 import {
   NavigationTab,
   TodoItem,
@@ -34,7 +35,8 @@ import {
   ReimburseStatus,
   LogbookEntry,
   SavedBarcode,
-  ChartOfAccount
+  ChartOfAccount,
+  ClosedPeriodRecord
 } from '../types';
 
 interface ToastMessage {
@@ -88,6 +90,10 @@ interface AppContextType {
   customCoaAccounts: ChartOfAccount[];
   upsertCoaAccount: (coa: ChartOfAccount) => void;
   deleteCustomCoaAccount: (code: string) => void;
+  closedPeriods: ClosedPeriodRecord[];
+  closePeriod: (record: Omit<ClosedPeriodRecord, 'closedAt'>) => void;
+  reopenPeriod: (periodId: string) => void;
+  isDateClosed: (dateStr: string) => ClosedPeriodRecord | undefined;
 
   // Finance Transactions & Cash / Non-Cash
   transactions: FinanceTransaction[];
@@ -216,6 +222,7 @@ const USER_STORAGE_KEYS = [
   'omnihub_reimbursements',
   'omnihub_reimburse_rates',
   'omnihub_custom_coa',
+  'omnihub_closed_periods',
 ];
 
 function clearUserWorkspaceStorage() {
@@ -368,6 +375,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [customCoaAccounts, setCustomCoaAccounts] = useState<ChartOfAccount[]>(() =>
     readJsonStorage<ChartOfAccount[]>('omnihub_custom_coa', [])
   );
+  const [closedPeriods, setClosedPeriods] = useState<ClosedPeriodRecord[]>(() =>
+    readJsonStorage<ClosedPeriodRecord[]>('omnihub_closed_periods', [])
+  );
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -378,6 +388,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     theme,
     noteCategories,
     customCoa: customCoaAccounts,
+    closedPeriods,
     accounts,
     transactions,
     debts,
@@ -396,6 +407,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     theme,
     noteCategories,
     customCoa: customCoaAccounts,
+    closedPeriods,
     accounts,
     transactions,
     debts,
@@ -458,6 +470,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem('omnihub_reimbursements', JSON.stringify(reimbursements)); }, [reimbursements]);
   useEffect(() => { localStorage.setItem('omnihub_reimburse_rates', JSON.stringify(reimburseRates)); }, [reimburseRates]);
   useEffect(() => { localStorage.setItem('omnihub_custom_coa', JSON.stringify(customCoaAccounts)); }, [customCoaAccounts]);
+  useEffect(() => { localStorage.setItem('omnihub_closed_periods', JSON.stringify(closedPeriods)); }, [closedPeriods]);
 
   useEffect(() => {
     const appTitle = appBranding.appName?.trim() || "Q'Hub";
@@ -544,6 +557,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (Array.isArray(ws.preferences.customCoa)) {
         setCustomCoaAccounts(ws.preferences.customCoa);
       }
+      if (Array.isArray(ws.preferences.closedPeriods)) {
+        setClosedPeriods(ws.preferences.closedPeriods);
+      }
     }
     if (Array.isArray(ws.accounts)) setAccounts(ws.accounts);
     if (Array.isArray(ws.transactions)) {
@@ -583,6 +599,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotes([]);
     setNoteCategories(DEFAULT_NOTE_CATEGORIES);
     setCustomCoaAccounts([]);
+    setClosedPeriods([]);
     setHabits([]);
     setLogbookEntries([]);
     setSavedBarcodes([]);
@@ -594,6 +611,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       theme,
       noteCategories: DEFAULT_NOTE_CATEGORIES,
       customCoa: [],
+      closedPeriods: [],
       accounts: [],
       transactions: [],
       debts: [],
@@ -1313,6 +1331,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const transferId = 'trf-' + baseTs;
     const txDate = date || new Date().toISOString().split('T')[0];
 
+    const lockedPeriod = findClosedPeriodForDate(txDate, closedPeriods);
+    if (lockedPeriod) {
+      showToast(`Tanggal ${txDate} berada di periode terkunci (${lockedPeriod.label}). Buka kembali (Reopen) di Tutup Buku jika ingin mengubah.`, 'warning');
+      return { success: false, error: 'Periode sudah tutup buku' };
+    }
+
     let outTitle = `Transfer ke ${targetAcc.name}`;
     let inTitle = `Transfer dari ${sourceAcc.name}`;
     let successMessage = `Transfer Rp ${amount.toLocaleString('id-ID')} dari ${sourceAcc.name} ke ${targetAcc.name} berhasil!`;
@@ -1405,6 +1429,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('Pilih akun dan masukkan nominal adjustment yang valid.', 'error');
       return;
     }
+    const adjDate = payload.date || new Date().toISOString().split('T')[0];
+    const lockedPeriod = findClosedPeriodForDate(adjDate, closedPeriods);
+    if (lockedPeriod) {
+      showToast(`Tanggal ${adjDate} berada di periode terkunci (${lockedPeriod.label}). Buka kembali (Reopen) terlebih dahulu.`, 'warning');
+      return;
+    }
     const id = 'tx-adj-' + Date.now();
     const isIncrease = payload.adjustmentType === 'increase';
     const adjTx: FinanceTransaction = {
@@ -1470,8 +1500,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast(`Perubahan/akun kustom COA [${cleanCode}] dihapus.`, 'info');
   };
 
+  // Closing Month & Closing Year operations
+  const isDateClosed = (dateStr: string): ClosedPeriodRecord | undefined => {
+    return findClosedPeriodForDate(dateStr, closedPeriods);
+  };
+
+  const closePeriod = (record: Omit<ClosedPeriodRecord, 'closedAt'>) => {
+    const fullRecord: ClosedPeriodRecord = {
+      ...record,
+      closedAt: new Date().toISOString(),
+    };
+    const nextList = [
+      ...closedPeriods.filter(cp => cp.id !== fullRecord.id),
+      fullRecord,
+    ].sort((a, b) => b.endDate.localeCompare(a.endDate));
+    setClosedPeriods(nextList);
+    if (hasActiveSession()) {
+      void cloudUpdateDoc('preferences', 'main', { closedPeriods: nextList });
+    }
+    confetti({ particleCount: 55, spread: 60, origin: { y: 0.7 } });
+    showToast(
+      `${fullRecord.periodType === 'year' ? 'Tutup Buku Tahunan' : 'Tutup Buku Bulanan'} "${fullRecord.label}" berhasil & diposting ke [${fullRecord.retainedCoaCode}] ${fullRecord.retainedCoaName}.`,
+      'success'
+    );
+  };
+
+  const reopenPeriod = (periodId: string) => {
+    const target = closedPeriods.find(cp => cp.id === periodId);
+    if (!target) return;
+    const nextList = closedPeriods.filter(cp => cp.id !== periodId);
+    setClosedPeriods(nextList);
+    if (hasActiveSession()) {
+      void cloudUpdateDoc('preferences', 'main', { closedPeriods: nextList });
+    }
+    showToast(`Periode "${target.label}" dibuka kembali (Reopened). Jurnal penutup otomatis ditarik.`, 'info');
+  };
+
   // Finance operations
   const addTransaction = (tx: Omit<FinanceTransaction, 'id'>) => {
+    const lockedPeriod = findClosedPeriodForDate(tx.date, closedPeriods);
+    if (lockedPeriod) {
+      showToast(`Tanggal ${tx.date} berada di periode yang sudah Tutup Buku (${lockedPeriod.label}). Buka kembali periode di tab Tutup Buku jika ingin menambah transaksi.`, 'warning');
+      return;
+    }
+
     const id = 'tx-' + Date.now();
     const matchedAccount = accounts.find(a => a.id === tx.accountId) || accounts.find(a => a.name === tx.accountName);
     const resolvedWalletType = matchedAccount ? (matchedAccount.type === 'cash' ? 'cash' : 'non_cash') : tx.walletType;
@@ -1492,12 +1564,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteTransaction = (id: string) => {
+    const target = transactions.find(t => t.id === id);
+    if (target) {
+      const lockedPeriod = findClosedPeriodForDate(target.date, closedPeriods);
+      if (lockedPeriod) {
+        showToast(`Transaksi ini berada di periode terkunci (${lockedPeriod.label}). Buka kembali periode tersebut jika ingin menghapus.`, 'warning');
+        return;
+      }
+    }
     setTransactions(prev => prev.filter(t => t.id !== id));
     void cloudDeleteDoc('transactions', id);
     showToast('Transaksi dihapus', 'info');
   };
 
   const updateTransaction = (id: string, updates: Partial<FinanceTransaction>) => {
+    const target = transactions.find(t => t.id === id);
+    if (target) {
+      const lockedOrig = findClosedPeriodForDate(target.date, closedPeriods);
+      if (lockedOrig) {
+        showToast(`Transaksi ini berada di periode terkunci (${lockedOrig.label}). Buka kembali periode tersebut jika ingin mengubah.`, 'warning');
+        return;
+      }
+    }
+    if (updates.date) {
+      const lockedNew = findClosedPeriodForDate(updates.date, closedPeriods);
+      if (lockedNew) {
+        showToast(`Tanggal tujuan ${updates.date} berada di periode terkunci (${lockedNew.label}).`, 'warning');
+        return;
+      }
+    }
     const cleanStateUpdates: Partial<FinanceTransaction> = { ...updates };
     if ((cleanStateUpdates as Record<string, unknown>).coaCode === null) cleanStateUpdates.coaCode = undefined;
     if ((cleanStateUpdates as Record<string, unknown>).coaName === null) cleanStateUpdates.coaName = undefined;
@@ -1511,6 +1606,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const voidTransaction = (id: string, reason?: string) => {
     const target = transactions.find(t => t.id === id);
     if (!target || target.isVoided || isContraVoidTransaction(target)) return;
+    const lockedPeriod = findClosedPeriodForDate(target.date, closedPeriods);
+    if (lockedPeriod) {
+      showToast(`Transaksi ini berada di periode terkunci (${lockedPeriod.label}). Buka kembali periode tersebut sebelum melakukan Void.`, 'warning');
+      return;
+    }
 
     const voidedAt = new Date().toISOString();
     const cleanReason = (reason?.trim() || 'Dibatalkan (Void) oleh pengguna').slice(0, 240);
@@ -2166,7 +2266,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       savedBarcodes,
       reimbursements,
       reimburseRates,
-      customCoa: customCoaAccounts
+      customCoa: customCoaAccounts,
+      closedPeriods
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2201,6 +2302,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (Array.isArray(data.reimbursements)) setReimbursements(data.reimbursements);
       if (Array.isArray(data.reimburseRates)) setReimburseRates(data.reimburseRates);
       if (Array.isArray(data.customCoa)) setCustomCoaAccounts(data.customCoa);
+      if (Array.isArray(data.closedPeriods)) setClosedPeriods(data.closedPeriods);
 
       if (hasActiveSession()) {
         setTimeout(() => {
@@ -2263,6 +2365,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         customCoaAccounts,
         upsertCoaAccount,
         deleteCustomCoaAccount,
+        closedPeriods,
+        closePeriod,
+        reopenPeriod,
+        isDateClosed,
         todos,
         addTodo,
         updateTodo,

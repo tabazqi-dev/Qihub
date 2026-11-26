@@ -4,14 +4,21 @@ import {
   CoaClass,
   FinancialAccount,
   JournalEntry,
-  CategoryBudget
+  CategoryBudget,
+  ClosedPeriodRecord
 } from '../../types';
 import {
   CoaLedgerSummary,
   AccountingEquationSummary,
   generateBalanceSheetSummary,
+  calculatePeriodClosingPreview,
   BASE_CHART_OF_ACCOUNTS
 } from '../../utils/accounting';
+import {
+  getPeriodRange,
+  formatPeriodLabel,
+  getFiscalYearRange
+} from '../../utils/billingPeriod';
 import {
   BookOpen,
   Scale,
@@ -28,7 +35,10 @@ import {
   BarChart3,
   Edit2,
   Plus,
-  RotateCcw
+  RotateCcw,
+  Lock,
+  Unlock,
+  CalendarCheck2
 } from 'lucide-react';
 
 interface ChartOfAccountsViewProps {
@@ -46,9 +56,25 @@ interface ChartOfAccountsViewProps {
   selectedMonth: string;
   onChangeMonth: (month: string) => void;
   availableMonths: string[];
+  closingMonthOptions?: string[];
+  availableYears?: string[];
+  currentPeriodKey?: string;
   cutoffDay?: number;
   periodRangeLabel?: string;
   formatMonthLabel?: (ym: string) => string;
+  closedPeriods?: ClosedPeriodRecord[];
+  onRequestClosePeriod?: (target: {
+    periodType: 'month' | 'year';
+    periodKey: string;
+    label: string;
+    startDate: string;
+    endDate: string;
+  }) => void;
+  onReopenPeriod?: (periodId: string) => void;
+  viewModeRequest?: {
+    mode: 'chart' | 'journal' | 'trial_balance' | 'balance_sheet' | 'pnl' | 'closing';
+    seq: number;
+  } | null;
   monthlyIncome: number;
   monthlyExpense: number;
   monthlyProfitLoss: number;
@@ -71,9 +97,16 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
   selectedMonth,
   onChangeMonth,
   availableMonths,
+  closingMonthOptions,
+  availableYears = [],
+  currentPeriodKey,
   cutoffDay = 26,
   periodRangeLabel,
   formatMonthLabel,
+  closedPeriods = [],
+  onRequestClosePeriod,
+  onReopenPeriod,
+  viewModeRequest,
   monthlyIncome,
   monthlyExpense,
   monthlyProfitLoss,
@@ -83,7 +116,12 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
   onAddBudget,
   onExportPnlCsv
 }) => {
-  const [viewMode, setViewMode] = useState<'chart' | 'journal' | 'trial_balance' | 'balance_sheet' | 'pnl'>('chart');
+  const [viewMode, setViewMode] = useState<'chart' | 'journal' | 'trial_balance' | 'balance_sheet' | 'pnl' | 'closing'>('chart');
+  React.useEffect(() => {
+    if (viewModeRequest?.mode) {
+      setViewMode(viewModeRequest.mode);
+    }
+  }, [viewModeRequest?.seq, viewModeRequest?.mode]);
   const [classFilter, setClassFilter] = useState<'all' | CoaClass>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCoaForDetail, setSelectedCoaForDetail] = useState<ChartOfAccount | null>(null);
@@ -452,6 +490,23 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
           <BarChart3 className="w-3.5 h-3.5" />
           <span>Laporan P&L & Budget</span>
         </button>
+
+        <button
+          onClick={() => setViewMode('closing')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-semibold transition-all cursor-pointer ${
+            viewMode === 'closing'
+              ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-xs'
+              : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+          }`}
+        >
+          <Lock className="w-3.5 h-3.5 text-amber-500" />
+          <span>Tutup Buku (Month / Year)</span>
+          {closedPeriods.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+              {closedPeriods.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* 1. CHART OF ACCOUNTS TREE */}
@@ -669,12 +724,23 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                 <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800 font-mono">
                   {journalEntries.map((entry) => (
                     <React.Fragment key={entry.id}>
-                      <tr className="bg-neutral-50/50 dark:bg-neutral-800/30 text-[11px]">
+                      <tr className={`text-[11px] ${
+                        entry.sourceType === 'closing'
+                          ? 'bg-amber-50/80 dark:bg-amber-950/30'
+                          : 'bg-neutral-50/50 dark:bg-neutral-800/30'
+                      }`}>
                         <td className="py-2 px-3 font-semibold text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
                           {entry.date} • <span className="text-indigo-600 dark:text-indigo-400">{entry.referenceNo}</span>
                         </td>
                         <td colSpan={2} className="py-2 px-3 font-sans font-semibold text-neutral-900 dark:text-neutral-100">
-                          {entry.description}
+                          <div className="flex items-center gap-2">
+                            {entry.sourceType === 'closing' && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-200/70 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold uppercase">
+                                Jurnal Penutup
+                              </span>
+                            )}
+                            <span>{entry.description}</span>
+                          </div>
                         </td>
                         <td colSpan={2} className="py-2 px-3 text-right text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
                           ✓ Seimbang ({currencySymbol} {entry.totalDebit.toLocaleString('id-ID')})
@@ -1090,6 +1156,269 @@ export const ChartOfAccountsView: React.FC<ChartOfAccountsViewProps> = ({
                   );
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. TUTUP BUKU (CLOSING MONTH & CLOSING YEAR) */}
+      {viewMode === 'closing' && (
+        <div className="space-y-6">
+          {/* Info Header */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CalendarCheck2 className="w-5 h-5 text-amber-500" />
+                <h4 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                  Tutup Buku Bulanan & Tahunan (Closing Month & Closing Year)
+                </h4>
+              </div>
+              <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300">
+                Akun Penutup: 3201 Surplus / Defisit Ditahan
+              </span>
+            </div>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+              Saat Anda melakukan <strong>Closing Month</strong> atau <strong>Closing Year</strong>, sistem membuatkan <strong>Jurnal Penutup</strong> yang memindahkan saldo bersih Pendapatan (4xxx) dan Beban (5xxx) periode tersebut ke <strong>3201 - Surplus / Defisit Ditahan</strong>, sekaligus mengunci transaksi pada periode tersebut agar laporan historis tetap akurat. Anda tetap bisa menekan <strong>Buka Kembali (Reopen)</strong> bila sewaktu-waktu butuh revisi.
+            </p>
+          </div>
+
+          {/* Closing Month List */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
+              <div>
+                <h5 className="text-xs font-bold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
+                  Closing Month (Cut-off Tanggal {cutoffDay} Tiap Bulan)
+                </h5>
+                <p className="text-[11px] text-neutral-500">
+                  Pastikan seluruh transaksi sampai sehari sebelum tanggal {cutoffDay} sudah dicatat sebelum menutup buku.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {(closingMonthOptions && closingMonthOptions.length > 0 ? closingMonthOptions : availableMonths).map((m) => {
+                const range = getPeriodRange(m, cutoffDay);
+                const monthLabel = formatMonthLabel ? formatMonthLabel(m) : `${range.startDate} – ${range.endDate}`;
+                const directClosed = closedPeriods.find((cp) => cp.id === `month:${m}`);
+                const coveringYearClosed = closedPeriods.find(
+                  (cp) => cp.periodType === 'year' && range.startDate >= cp.startDate && range.endDate <= cp.endDate
+                );
+                const isClosed = Boolean(directClosed || coveringYearClosed);
+                const isCurrent = currentPeriodKey === m;
+                const preview = calculatePeriodClosingPreview(
+                  journalEntries,
+                  range.startDate,
+                  range.endDate,
+                  closedPeriods,
+                  `month:${m}`
+                );
+
+                return (
+                  <div
+                    key={m}
+                    className={`p-4 rounded-xl border flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                      isClosed
+                        ? 'bg-emerald-50/40 dark:bg-emerald-950/15 border-emerald-200 dark:border-emerald-900/50'
+                        : !isCurrent
+                        ? 'bg-amber-50/40 dark:bg-amber-950/15 border-amber-200 dark:border-amber-900/50'
+                        : 'bg-neutral-50/70 dark:bg-neutral-800/40 border-neutral-200 dark:border-neutral-800'
+                    }`}
+                  >
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
+                          {monthLabel}
+                        </span>
+                        <span className="text-[10px] font-mono text-neutral-400">
+                          ({range.startDate} s/d {range.endDate})
+                        </span>
+                        {isClosed ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                            <Lock className="w-3 h-3" />
+                            <span>{directClosed ? 'Closed (Bulan Ditutup)' : `Closed via Tahun ${coveringYearClosed?.periodKey}`}</span>
+                          </span>
+                        ) : isCurrent ? (
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
+                            Periode Berjalan (Open)
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold">
+                            Belum Tutup Buku (Open)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-mono tabular-nums">
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          Pendapatan: +{currencySymbol} {preview.totalRevenue.toLocaleString('id-ID')}
+                        </span>
+                        <span className="text-rose-600 dark:text-rose-400">
+                          Beban: -{currencySymbol} {preview.totalExpense.toLocaleString('id-ID')}
+                        </span>
+                        <span className={`font-bold ${preview.netSurplusDeficit >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                          Surplus/Defisit: {preview.netSurplusDeficit >= 0 ? '+' : '-'}{currencySymbol} {Math.abs(preview.netSurplusDeficit).toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      {directClosed?.notes && (
+                        <p className="text-[11px] text-neutral-500 italic">Catatan: {directClosed.notes}</p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onChangeMonth(m);
+                          setViewMode('pnl');
+                        }}
+                        className="px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs font-semibold hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                      >
+                        Lihat P&L
+                      </button>
+
+                      {directClosed ? (
+                        onReopenPeriod && (
+                          <button
+                            type="button"
+                            onClick={() => onReopenPeriod(directClosed.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-xs font-semibold hover:bg-amber-100 cursor-pointer"
+                          >
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>Buka Kembali (Reopen)</span>
+                          </button>
+                        )
+                      ) : !coveringYearClosed && onRequestClosePeriod ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onRequestClosePeriod({
+                              periodType: 'month',
+                              periodKey: m,
+                              label: monthLabel,
+                              startDate: range.startDate,
+                              endDate: range.endDate,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold hover:opacity-90 cursor-pointer"
+                        >
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Tutup Buku Bulan</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Closing Year List */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-3">
+              <div>
+                <h5 className="text-xs font-bold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
+                  Closing Year (Tutup Buku Tahunan)
+                </h5>
+                <p className="text-[11px] text-neutral-500">
+                  Menutup sisa pendapatan & beban sepanjang tahun fiskal ke 3201 dan mengunci pembukuan tahunan tanpa menghitung ganda bulan yang sudah di-close.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {(availableYears.length > 0 ? availableYears : [new Date().getFullYear().toString()]).map((y) => {
+                const yr = getFiscalYearRange(y);
+                const closedYear = closedPeriods.find((cp) => cp.id === `year:${y}`);
+                const preview = calculatePeriodClosingPreview(
+                  journalEntries,
+                  yr.startDate,
+                  yr.endDate,
+                  closedPeriods,
+                  `year:${y}`
+                );
+                const alreadyClosedPart = preview.netSurplusDeficit - preview.unclosedNetSurplusDeficit;
+
+                return (
+                  <div
+                    key={y}
+                    className={`p-4 rounded-xl border flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                      closedYear
+                        ? 'bg-emerald-50/40 dark:bg-emerald-950/15 border-emerald-200 dark:border-emerald-900/50'
+                        : 'bg-neutral-50/70 dark:bg-neutral-800/40 border-neutral-200 dark:border-neutral-800'
+                    }`}
+                  >
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
+                          {yr.label}
+                        </span>
+                        {closedYear ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                            <Lock className="w-3 h-3" />
+                            <span>Closed (Tahun Ditutup)</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold">
+                            Tahun Terbuka (Open)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-mono tabular-nums">
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          Pendapatan Tahunan: +{currencySymbol} {preview.totalRevenue.toLocaleString('id-ID')}
+                        </span>
+                        <span className="text-rose-600 dark:text-rose-400">
+                          Beban Tahunan: -{currencySymbol} {preview.totalExpense.toLocaleString('id-ID')}
+                        </span>
+                        <span className={`font-bold ${preview.netSurplusDeficit >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                          Net Tahunan: {preview.netSurplusDeficit >= 0 ? '+' : '-'}{currencySymbol} {Math.abs(preview.netSurplusDeficit).toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-neutral-500">
+                        Sudah ditutup per bulan: {currencySymbol} {alreadyClosedPart.toLocaleString('id-ID')} • Sisa belum ditutup: {currencySymbol} {preview.unclosedNetSurplusDeficit.toLocaleString('id-ID')} ({preview.unclosedEntryCount} jurnal)
+                      </p>
+                      {closedYear?.notes && (
+                        <p className="text-[11px] text-neutral-500 italic">Catatan: {closedYear.notes}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {closedYear ? (
+                        onReopenPeriod && (
+                          <button
+                            type="button"
+                            onClick={() => onReopenPeriod(closedYear.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-xs font-semibold hover:bg-amber-100 cursor-pointer"
+                          >
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>Buka Kembali (Reopen)</span>
+                          </button>
+                        )
+                      ) : onRequestClosePeriod ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onRequestClosePeriod({
+                              periodType: 'year',
+                              periodKey: y,
+                              label: yr.label,
+                              startDate: yr.startDate,
+                              endDate: yr.endDate,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer"
+                        >
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Tutup Buku Tahun {y}</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

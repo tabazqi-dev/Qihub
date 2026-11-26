@@ -81,11 +81,28 @@ export interface JournalEntry {
   date: string;
   referenceNo: string;
   description: string;
-  sourceType: 'transaction' | 'initial_balance' | 'debt' | 'my_debt' | 'audit_adjustment' | 'transfer';
+  sourceType: 'transaction' | 'initial_balance' | 'debt' | 'my_debt' | 'audit_adjustment' | 'transfer' | 'closing';
   lines: JournalLine[];
   totalDebit: number;
   totalCredit: number;
   isBalanced: boolean;
+}
+
+export interface ClosedPeriodRecord {
+  id: string; // 'month:2026-10' | 'year:2026'
+  periodType: 'month' | 'year';
+  periodKey: string; // 'YYYY-MM' | 'YYYY'
+  label: string; // e.g. '26 Okt – 25 Nov 2026' or 'Tahun Fiskal 2026'
+  startDate: string; // YYYY-MM-DD inclusive
+  endDate: string; // YYYY-MM-DD inclusive
+  cutoffDay: number;
+  totalRevenue: number;
+  totalExpense: number;
+  netSurplusDeficit: number;
+  retainedCoaCode: string; // '3201'
+  retainedCoaName: string; // 'Surplus / Defisit Ditahan'
+  closedAt: string; // ISO timestamp
+  notes?: string;
 }
 
 export interface FinancialAccount {

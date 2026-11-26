@@ -13,6 +13,7 @@ const REQUIRED_SCHEMA_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['qhub_profiles', 'app_logo_url'],
   ['qhub_profiles', 'monthly_cutoff_day'],
   ['qhub_preferences', 'custom_coa'],
+  ['qhub_preferences', 'closed_periods'],
   ['qhub_accounts', 'coa_code'],
   ['qhub_transactions', 'void_reason'],
   ['qhub_debts', 'items'],
@@ -76,6 +77,7 @@ CREATE TABLE IF NOT EXISTS qhub_preferences (
   theme TEXT NOT NULL DEFAULT 'dark',
   note_categories JSONB NOT NULL DEFAULT '[]'::jsonb,
   custom_coa JSONB NOT NULL DEFAULT '[]'::jsonb,
+  closed_periods JSONB NOT NULL DEFAULT '[]'::jsonb,
   initialized BOOLEAN NOT NULL DEFAULT FALSE,
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -294,6 +296,7 @@ ALTER TABLE qhub_users ADD COLUMN IF NOT EXISTS google_uid TEXT;
 ALTER TABLE qhub_users ADD COLUMN IF NOT EXISTS google_email TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS qhub_users_google_uid_idx ON qhub_users (google_uid) WHERE google_uid IS NOT NULL;
 ALTER TABLE qhub_preferences ADD COLUMN IF NOT EXISTS custom_coa JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE qhub_preferences ADD COLUMN IF NOT EXISTS closed_periods JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE qhub_my_debts ADD COLUMN IF NOT EXISTS add_to_account BOOLEAN;
 ALTER TABLE qhub_profiles ADD COLUMN IF NOT EXISTS monthly_cutoff_day INTEGER NOT NULL DEFAULT 26;
 `;

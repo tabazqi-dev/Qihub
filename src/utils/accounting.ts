@@ -6,7 +6,8 @@ import {
   JournalEntry, 
   JournalLine,
   MyDebtLiability,
-  DebtReceivable 
+  DebtReceivable,
+  ClosedPeriodRecord
 } from '../types';
 
 export const isContraVoidTransaction = (tx: Pick<FinanceTransaction, 'id' | 'title'>): boolean => {
@@ -691,7 +692,8 @@ export const generateStandardJournalEntries = (
   accounts: FinancialAccount[],
   myDebts: MyDebtLiability[],
   debts: DebtReceivable[],
-  customCoaAccounts: ChartOfAccount[] = []
+  customCoaAccounts: ChartOfAccount[] = [],
+  closedPeriods: ClosedPeriodRecord[] = []
 ): JournalEntry[] => {
   const allCoa = getAllChartOfAccounts(accounts, customCoaAccounts);
   const entries: JournalEntry[] = [];
@@ -857,7 +859,230 @@ export const generateStandardJournalEntries = (
     });
   });
 
+  // 3. Closing Journal Entries (Tutup Buku Bulanan & Tahunan -> 3201 Surplus / Defisit Ditahan)
+  if (Array.isArray(closedPeriods) && closedPeriods.length > 0) {
+    const sortedClosed = [...closedPeriods].sort((a, b) => {
+      if (a.endDate !== b.endDate) return a.endDate.localeCompare(b.endDate);
+      if (a.periodType !== b.periodType) return a.periodType === 'month' ? -1 : 1;
+      return a.id.localeCompare(b.id);
+    });
+
+    const closedEntryIds = new Set<string>();
+    const retainedCoa = findCoaByCodeOrFallback(allCoa, '3201');
+    const baseEntries = [...entries];
+
+    sortedClosed.forEach((cp) => {
+      const accountAcc = new Map<string, { code: string; name: string; category: CoaClass; debit: number; credit: number }>();
+
+      baseEntries.forEach((entry) => {
+        if (closedEntryIds.has(entry.id)) return;
+        if (entry.date < cp.startDate || entry.date > cp.endDate) return;
+
+        let touchedPnl = false;
+        entry.lines.forEach((line) => {
+          if (line.category !== 'revenue' && line.category !== 'expense') return;
+          touchedPnl = true;
+          const prev = accountAcc.get(line.accountCode) || {
+            code: line.accountCode,
+            name: line.accountName,
+            category: line.category,
+            debit: 0,
+            credit: 0,
+          };
+          prev.debit += line.debit;
+          prev.credit += line.credit;
+          accountAcc.set(line.accountCode, prev);
+        });
+
+        if (touchedPnl) {
+          closedEntryIds.add(entry.id);
+        }
+      });
+
+      const closingLines: JournalLine[] = [];
+      let sumClosingDebit = 0;
+      let sumClosingCredit = 0;
+
+      Array.from(accountAcc.values())
+        .sort((a, b) => a.code.localeCompare(b.code))
+        .forEach((acc) => {
+          // To zero out: credit-normal revenue has net (credit - debit), debit-normal expense has net (debit - credit)
+          // Regardless of normalBalance, posting debit = max(0, acc.credit - acc.debit) & credit = max(0, acc.debit - acc.credit) nets the account to 0
+          const netCreditSide = acc.credit - acc.debit;
+          if (Math.abs(netCreditSide) < 0.01) return;
+
+          if (netCreditSide > 0) {
+            closingLines.push({
+              accountCode: acc.code,
+              accountName: acc.name,
+              category: acc.category,
+              debit: netCreditSide,
+              credit: 0,
+            });
+            sumClosingDebit += netCreditSide;
+          } else {
+            const amt = Math.abs(netCreditSide);
+            closingLines.push({
+              accountCode: acc.code,
+              accountName: acc.name,
+              category: acc.category,
+              debit: 0,
+              credit: amt,
+            });
+            sumClosingCredit += amt;
+          }
+        });
+
+      const netSurplus = sumClosingDebit - sumClosingCredit;
+      if (closingLines.length === 0) return;
+
+      const targetEquityCoa = findCoaByCodeOrFallback(allCoa, cp.retainedCoaCode || retainedCoa.code, '3201');
+      if (netSurplus > 0) {
+        closingLines.push({
+          accountCode: targetEquityCoa.code,
+          accountName: targetEquityCoa.name,
+          category: 'equity',
+          debit: 0,
+          credit: netSurplus,
+        });
+        sumClosingCredit += netSurplus;
+      } else if (netSurplus < 0) {
+        const deficit = Math.abs(netSurplus);
+        closingLines.push({
+          accountCode: targetEquityCoa.code,
+          accountName: targetEquityCoa.name,
+          category: 'equity',
+          debit: deficit,
+          credit: 0,
+        });
+        sumClosingDebit += deficit;
+      }
+
+      const refNo = cp.periodType === 'year'
+        ? `CLS-Y-${cp.periodKey}`
+        : `CLS-M-${cp.periodKey.replace('-', '')}`;
+
+      entries.push({
+        id: `jnl-close-${cp.id}`,
+        date: cp.endDate,
+        referenceNo: refNo,
+        description: cp.periodType === 'year'
+          ? `Tutup Buku Tahunan (${cp.label})`
+          : `Tutup Buku Bulanan (${cp.label})`,
+        sourceType: 'closing',
+        lines: closingLines,
+        totalDebit: sumClosingDebit,
+        totalCredit: sumClosingCredit,
+        isBalanced: Math.abs(sumClosingDebit - sumClosingCredit) < 1,
+      });
+    });
+  }
+
   return entries.sort((a, b) => b.date.localeCompare(a.date));
+};
+
+export interface PeriodClosingAccountItem {
+  code: string;
+  name: string;
+  category: 'revenue' | 'expense';
+  fullPeriodAmount: number;
+  unclosedAmount: number;
+}
+
+export interface PeriodClosingPreview {
+  totalRevenue: number;
+  totalExpense: number;
+  netSurplusDeficit: number;
+  unclosedRevenue: number;
+  unclosedExpense: number;
+  unclosedNetSurplusDeficit: number;
+  pnlEntryCount: number;
+  unclosedEntryCount: number;
+  accountBreakdown: PeriodClosingAccountItem[];
+}
+
+export const calculatePeriodClosingPreview = (
+  journalEntries: JournalEntry[],
+  startDate: string,
+  endDate: string,
+  closedPeriods: ClosedPeriodRecord[],
+  targetPeriodId?: string
+): PeriodClosingPreview => {
+  // Determine which base entries are already closed by OTHER closed periods (sorted before/alongside)
+  const otherClosed = closedPeriods.filter((cp) => cp.id !== targetPeriodId);
+  const alreadyClosedEntryIds = new Set<string>();
+
+  const baseEntries = journalEntries.filter((e) => e.sourceType !== 'closing');
+  otherClosed.forEach((cp) => {
+    baseEntries.forEach((entry) => {
+      if (entry.date < cp.startDate || entry.date > cp.endDate) return;
+      const hasPnl = entry.lines.some((l) => l.category === 'revenue' || l.category === 'expense');
+      if (hasPnl) {
+        alreadyClosedEntryIds.add(entry.id);
+      }
+    });
+  });
+
+  let totalRevenue = 0;
+  let totalExpense = 0;
+  let unclosedRevenue = 0;
+  let unclosedExpense = 0;
+  let pnlEntryCount = 0;
+  let unclosedEntryCount = 0;
+
+  const accountMap = new Map<string, PeriodClosingAccountItem>();
+
+  baseEntries.forEach((entry) => {
+    if (entry.date < startDate || entry.date > endDate) return;
+    const isAlreadyClosed = alreadyClosedEntryIds.has(entry.id);
+    let touchedPnl = false;
+
+    entry.lines.forEach((line) => {
+      if (line.category !== 'revenue' && line.category !== 'expense') return;
+      touchedPnl = true;
+      const net = line.category === 'revenue'
+        ? (line.credit - line.debit)
+        : (line.debit - line.credit);
+
+      if (line.category === 'revenue') {
+        totalRevenue += net;
+        if (!isAlreadyClosed) unclosedRevenue += net;
+      } else {
+        totalExpense += net;
+        if (!isAlreadyClosed) unclosedExpense += net;
+      }
+
+      const prev = accountMap.get(line.accountCode) || {
+        code: line.accountCode,
+        name: line.accountName,
+        category: line.category,
+        fullPeriodAmount: 0,
+        unclosedAmount: 0,
+      };
+      prev.fullPeriodAmount += net;
+      if (!isAlreadyClosed) prev.unclosedAmount += net;
+      accountMap.set(line.accountCode, prev);
+    });
+
+    if (touchedPnl) {
+      pnlEntryCount += 1;
+      if (!isAlreadyClosed) unclosedEntryCount += 1;
+    }
+  });
+
+  return {
+    totalRevenue,
+    totalExpense,
+    netSurplusDeficit: totalRevenue - totalExpense,
+    unclosedRevenue,
+    unclosedExpense,
+    unclosedNetSurplusDeficit: unclosedRevenue - unclosedExpense,
+    pnlEntryCount,
+    unclosedEntryCount,
+    accountBreakdown: Array.from(accountMap.values())
+      .filter((item) => Math.abs(item.fullPeriodAmount) > 0.01)
+      .sort((a, b) => a.code.localeCompare(b.code)),
+  };
 };
 
 // =========================================================================
@@ -930,7 +1155,11 @@ export const calculateCoaLedgers = (
 
       // Find contra account (the other line in the journal entry)
       const contraLine = entry.lines.find(l => l.accountCode !== line.accountCode);
-      const contraName = contraLine ? `${contraLine.accountCode} ${contraLine.accountName}` : 'Serbaneka';
+      const contraName = entry.sourceType === 'closing'
+        ? (line.accountCode === '3201'
+            ? 'Penutupan Akun Pendapatan & Beban'
+            : '3201 Surplus / Defisit Ditahan (Tutup Buku)')
+        : (contraLine ? `${contraLine.accountCode} ${contraLine.accountName}` : 'Serbaneka');
 
       // Running balance
       const currentBalance = target.account.normalBalance === 'debit'

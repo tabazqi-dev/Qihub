@@ -144,6 +144,58 @@ function sanitizeCustomCoaList(val: unknown): SanitizedCustomCoa[] {
   return Array.from(byCode.values());
 }
 
+interface SanitizedClosedPeriod {
+  id: string;
+  periodType: 'month' | 'year';
+  periodKey: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  cutoffDay: number;
+  totalRevenue: number;
+  totalExpense: number;
+  netSurplusDeficit: number;
+  retainedCoaCode: string;
+  retainedCoaName: string;
+  closedAt: string;
+  notes?: string;
+}
+
+function sanitizeClosedPeriods(val: unknown): SanitizedClosedPeriod[] {
+  if (!Array.isArray(val)) return [];
+  const byId = new Map<string, SanitizedClosedPeriod>();
+  for (const item of val.slice(0, 240)) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    const periodType: 'month' | 'year' = r.periodType === 'year' ? 'year' : 'month';
+    const periodKey = sanitizeStr(r.periodKey, 16).trim();
+    const id = sanitizeStr(r.id, 64).trim() || `${periodType}:${periodKey}`;
+    const startDate = sanitizeDate(r.startDate);
+    const endDate = sanitizeDate(r.endDate);
+    if (!periodKey || !id || startDate > endDate) continue;
+    const totalRevenue = sanitizeNum(r.totalRevenue, 0, -1e12, 1e12);
+    const totalExpense = sanitizeNum(r.totalExpense, 0, -1e12, 1e12);
+    const netSurplusDeficit = sanitizeNum(r.netSurplusDeficit, totalRevenue - totalExpense, -1e12, 1e12);
+    byId.set(id, {
+      id,
+      periodType,
+      periodKey,
+      label: sanitizeStr(r.label, 120, periodKey) || periodKey,
+      startDate,
+      endDate,
+      cutoffDay: sanitizeCutoffDay(r.cutoffDay, 26),
+      totalRevenue,
+      totalExpense,
+      netSurplusDeficit,
+      retainedCoaCode: sanitizeStr(r.retainedCoaCode, 32, '3201') || '3201',
+      retainedCoaName: sanitizeStr(r.retainedCoaName, 160, 'Surplus / Defisit Ditahan') || 'Surplus / Defisit Ditahan',
+      closedAt: sanitizeStr(r.closedAt, 64, new Date().toISOString()) || new Date().toISOString(),
+      notes: sanitizeOptStr(r.notes, 400) ?? undefined,
+    });
+  }
+  return Array.from(byId.values());
+}
+
 const requireDatabase = async (_req: AuthRequest, res: Response, next: NextFunction) => {
   if (!isDatabaseConfigured()) {
     return res.status(503).json({
@@ -387,6 +439,7 @@ workspaceRouter.get('/workspace', requireAuth, requireDatabase, async (req: Auth
               theme: pref.theme === 'light' ? 'light' : 'dark',
               noteCategories: Array.isArray(pref.noteCategories) ? pref.noteCategories : [],
               customCoa: Array.isArray(pref.customCoa) ? pref.customCoa : [],
+              closedPeriods: Array.isArray(pref.closedPeriods) ? pref.closedPeriods : [],
               initialized: pref.initialized,
             }
           : null,
@@ -615,6 +668,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
           theme: ws.theme === 'light' ? 'light' : 'dark',
           noteCategories: sanitizeStrArray(ws.noteCategories, 50, 80),
           customCoa: sanitizeCustomCoaList(ws.customCoa),
+          closedPeriods: sanitizeClosedPeriods(ws.closedPeriods),
           initialized: true,
           updatedAt: new Date(),
         })
@@ -624,6 +678,7 @@ workspaceRouter.post('/workspace/sync', requireAuth, requireDatabase, async (req
             theme: ws.theme === 'light' ? 'light' : 'dark',
             noteCategories: sanitizeStrArray(ws.noteCategories, 50, 80),
             customCoa: sanitizeCustomCoaList(ws.customCoa),
+            closedPeriods: sanitizeClosedPeriods(ws.closedPeriods),
             initialized: true,
             updatedAt: new Date(),
           },
@@ -991,6 +1046,7 @@ workspaceRouter.put('/workspace/preferences', requireAuth, requireDatabase, asyn
     const theme = p.theme !== undefined ? (p.theme === 'light' ? 'light' : 'dark') : (cur?.theme || 'dark');
     const noteCategories = p.noteCategories !== undefined ? sanitizeStrArray(p.noteCategories, 50, 80) : (cur?.noteCategories || []);
     const customCoa = p.customCoa !== undefined ? sanitizeCustomCoaList(p.customCoa) : (cur?.customCoa || []);
+    const closedPeriods = p.closedPeriods !== undefined ? sanitizeClosedPeriods(p.closedPeriods) : (cur?.closedPeriods || []);
     const initialized = p.initialized !== undefined ? Boolean(p.initialized) : (cur?.initialized ?? true);
 
     await db.insert(qhubPreferences).values({
@@ -998,11 +1054,12 @@ workspaceRouter.put('/workspace/preferences', requireAuth, requireDatabase, asyn
       theme,
       noteCategories,
       customCoa,
+      closedPeriods,
       initialized,
       updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: qhubPreferences.userId,
-      set: { theme, noteCategories, customCoa, initialized, updatedAt: new Date() },
+      set: { theme, noteCategories, customCoa, closedPeriods, initialized, updatedAt: new Date() },
     });
     return res.json({ success: true });
   } catch (err) {

@@ -107,11 +107,29 @@ export interface StoredCustomCoa {
   isCustom?: boolean;
 }
 
+export interface StoredClosedPeriod {
+  id: string;
+  periodType: 'month' | 'year';
+  periodKey: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  cutoffDay: number;
+  totalRevenue: number;
+  totalExpense: number;
+  netSurplusDeficit: number;
+  retainedCoaCode: string;
+  retainedCoaName: string;
+  closedAt: string;
+  notes?: string;
+}
+
 export const qhubPreferences = pgTable('qhub_preferences', {
   userId: text('user_id').primaryKey().references(() => qhubUsers.uid, { onDelete: 'cascade' }),
   theme: text('theme').notNull().default('dark'),
   noteCategories: jsonb('note_categories').$type<string[]>().notNull().default([]),
   customCoa: jsonb('custom_coa').$type<StoredCustomCoa[]>().notNull().default([]),
+  closedPeriods: jsonb('closed_periods').$type<StoredClosedPeriod[]>().notNull().default([]),
   initialized: boolean('initialized').notNull().default(false),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

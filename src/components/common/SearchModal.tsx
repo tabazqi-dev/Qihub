@@ -52,7 +52,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => 
   const quickNavs: { label: string; tab: NavigationTab; desc: string }[] = [
     { label: 'Keuangan, Piutang & Invoice', tab: 'finance', desc: 'Saldo cash/non-cash, buku piutang & tagih WA' },
     { label: 'Remove Background Studio', tab: 'removebg', desc: 'Hapus background foto & ganti latar instan' },
-    { label: 'Image Converter (PNG ⇄ JPG)', tab: 'converter', desc: 'Konversi format PNG ke JPG, JPG ke PNG, atau WebP' },
+    { label: 'Image Converter (PNG ⇄ JPG / HEIC)', tab: 'converter', desc: 'Konversi format PNG, JPG, HEIC (iPhone), dan WebP' },
     { label: 'PDF Utilities & Convert', tab: 'pdftools', desc: 'Konversi gambar ke PDF & ekstrak teks' },
     { label: 'QR & Barcode Studio', tab: 'barcode', desc: 'Buat & scan kode QR / barcode' },
     { label: 'Todo & Master Kalender', tab: 'todos', desc: 'Kalender bulanan & task board' },

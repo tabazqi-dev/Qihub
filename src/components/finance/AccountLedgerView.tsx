@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { 
   FinancialAccount, 
   FinanceTransaction, 
-  ChartOfAccount 
+  ChartOfAccount,
+  ClosedPeriodRecord
 } from '../../types';
 import { 
   ArrowLeft, 
@@ -22,7 +23,8 @@ import {
   ExternalLink,
   ChevronDown,
   ArrowLeftRight,
-  Ban
+  Ban,
+  Lock
 } from 'lucide-react';
 import {
   getCoaForFinancialAccount,
@@ -47,6 +49,7 @@ interface AccountLedgerViewProps {
   onVoidTransaction?: (id: string) => void;
   onNavigateToCoa: () => void;
   onOpenTransfer?: (sourceAccountId: string, type: 'cash_withdrawal' | 'transfer' | 'ewallet_topup' | 'cash_deposit') => void;
+  isDateClosed?: (dateStr: string) => ClosedPeriodRecord | undefined;
 }
 
 export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
@@ -63,7 +66,8 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
   onEditTransaction,
   onVoidTransaction,
   onNavigateToCoa,
-  onOpenTransfer
+  onOpenTransfer,
+  isDateClosed
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
@@ -388,6 +392,7 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
                   const isIncome = m.type === 'income';
                   const isContra = isContraVoidTransaction(m);
                   const cleanVoidReason = formatVoidReason(m.voidReason);
+                  const closedLock = isDateClosed?.(m.date);
 
                   return (
                     <tr 
@@ -403,6 +408,15 @@ export const AccountLedgerView: React.FC<AccountLedgerViewProps> = ({
                       <td className="py-3 px-3 font-sans">
                         <div className="font-semibold flex flex-wrap items-center gap-1.5 text-neutral-900 dark:text-neutral-100">
                           <span>{m.title}</span>
+                          {closedLock && (
+                            <span
+                              title={`Periode sudah ditutup (${closedLock.label})`}
+                              className="px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-[9px] font-mono font-bold inline-flex items-center gap-0.5"
+                            >
+                              <Lock className="w-2.5 h-2.5" />
+                              CLOSED
+                            </span>
+                          )}
                           {m.isVoided && (
                             <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 text-[9px] font-mono font-bold">
                               DI-VOID

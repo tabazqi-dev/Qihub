@@ -66,16 +66,31 @@ function detectSourceFormat(file: File): string {
   if (mime === 'image/bmp') return 'BMP';
   if (mime === 'image/svg+xml') return 'SVG';
   if (mime === 'image/avif') return 'AVIF';
+  if (mime === 'image/heic' || mime === 'image/heic-sequence') return 'HEIC';
+  if (mime === 'image/heif' || mime === 'image/heif-sequence') return 'HEIF';
   const ext = file.name.split('.').pop()?.toUpperCase();
   return ext || 'IMAGE';
+}
+
+function isHeicFormat(sourceFormat: string, file?: File): boolean {
+  if (sourceFormat === 'HEIC' || sourceFormat === 'HEIF') return true;
+  if (!file) return false;
+  const mime = (file.type || '').toLowerCase();
+  return (
+    mime === 'image/heic' ||
+    mime === 'image/heic-sequence' ||
+    mime === 'image/heif' ||
+    mime === 'image/heif-sequence' ||
+    /\.(heic|heif)$/i.test(file.name)
+  );
 }
 
 function resolveTargetFormat(mode: TargetFormatMode, sourceFormat: string): OutputFormat {
   if (mode === 'jpg') return 'jpg';
   if (mode === 'png') return 'png';
   if (mode === 'webp') return 'webp';
-  // auto_flip: PNG -> JPG, others (JPG/WebP/etc.) -> PNG
-  return sourceFormat === 'PNG' ? 'jpg' : 'png';
+  // auto_flip: PNG & HEIC/HEIF -> JPG, others (JPG/WebP/etc.) -> PNG
+  return sourceFormat === 'PNG' || sourceFormat === 'HEIC' || sourceFormat === 'HEIF' ? 'jpg' : 'png';
 }
 
 function getBaseFileName(name: string): string {
@@ -97,6 +112,49 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error('Format gambar tidak dapat dibaca browser'));
     img.src = src;
   });
+}
+
+async function prepareReadableSourceUrl(file: File, sourceFormat: string): Promise<{
+  sourceUrl: string;
+  width: number;
+  height: number;
+}> {
+  const rawUrl = URL.createObjectURL(file);
+  try {
+    const img = await loadImageElement(rawUrl);
+    return {
+      sourceUrl: rawUrl,
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+    };
+  } catch (err) {
+    if (!isHeicFormat(sourceFormat, file)) {
+      return { sourceUrl: rawUrl, width: 0, height: 0 };
+    }
+
+    // Decode HEIC/HEIF in-browser for non-Safari browsers
+    try {
+      const { default: heic2any } = await import('heic2any');
+      const result = await heic2any({
+        blob: file,
+        toType: 'image/png',
+      });
+      const decodedBlob = Array.isArray(result) ? result[0] : result;
+      if (!decodedBlob) {
+        throw err;
+      }
+      const decodedUrl = URL.createObjectURL(decodedBlob);
+      URL.revokeObjectURL(rawUrl);
+      const decodedImg = await loadImageElement(decodedUrl);
+      return {
+        sourceUrl: decodedUrl,
+        width: decodedImg.naturalWidth,
+        height: decodedImg.naturalHeight,
+      };
+    } catch {
+      return { sourceUrl: rawUrl, width: 0, height: 0 };
+    }
+  }
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, mime: string, quality?: number): Promise<Blob> {
@@ -266,73 +324,103 @@ export const ImageConverterView: React.FC = () => {
   const handleFilesAdded = useCallback(
     async (fileList: FileList | File[]) => {
       const files = Array.from(fileList).filter((f) =>
-        f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(f.name)
+        f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif)$/i.test(f.name)
       );
 
       if (files.length === 0) {
-        showToast('Pilih berkas gambar yang valid (PNG, JPG, WebP, BMP, GIF, SVG)', 'warning');
+        showToast('Pilih berkas gambar yang valid (PNG, JPG, HEIC, WebP, BMP, GIF, SVG)', 'warning');
         return;
       }
 
-      const newItems: ConverterItem[] = [];
-      for (const file of files) {
-        const sourceUrl = URL.createObjectURL(file);
+      const queuedEntries = files.map((file) => {
         const sourceFormat = detectSourceFormat(file);
-        let width = 0;
-        let height = 0;
-        try {
-          const img = await loadImageElement(sourceUrl);
-          width = img.naturalWidth;
-          height = img.naturalHeight;
-        } catch {
-          // Will report cleanly during conversion
-        }
-
         const id = `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        newItems.push({
+        const item: ConverterItem = {
           id,
           fileName: file.name,
           baseName: getBaseFileName(file.name),
           sourceFormat,
-          sourceMime: file.type || 'image/unknown',
+          sourceMime: file.type || (isHeicFormat(sourceFormat, file) ? 'image/heic' : 'image/unknown'),
           sourceSize: file.size,
-          sourceUrl,
-          width,
-          height,
+          sourceUrl: '',
+          width: 0,
+          height: 0,
           targetFormat: resolveTargetFormat(formatMode, sourceFormat),
           convertedUrl: null,
           convertedBlob: null,
           convertedSize: 0,
-          convertedWidth: width,
-          convertedHeight: height,
+          convertedWidth: 0,
+          convertedHeight: 0,
           status: 'converting',
-        });
+        };
+        return { file, item };
+      });
+
+      setItems((prev) => [...prev, ...queuedEntries.map((entry) => entry.item)]);
+      setSelectedId((prev) => prev || queuedEntries[0]?.item.id || null);
+
+      const hasHeic = queuedEntries.some((e) => isHeicFormat(e.item.sourceFormat, e.file));
+      if (hasHeic) {
+        showToast('Memproses gambar HEIC/HEIF di browser...', 'info');
       }
 
-      setItems((prev) => [...prev, ...newItems]);
-      setSelectedId((prev) => prev || newItems[0]?.id || null);
+      let successCount = 0;
+      for (const { file, item } of queuedEntries) {
+        const prepared = await prepareReadableSourceUrl(file, item.sourceFormat);
+        const preparedItem: ConverterItem = {
+          ...item,
+          sourceUrl: prepared.sourceUrl,
+          width: prepared.width,
+          height: prepared.height,
+          convertedWidth: prepared.width,
+          convertedHeight: prepared.height,
+        };
 
-      for (const item of newItems) {
-        const result = await convertSingleItem(
-          item,
-          item.targetFormat,
-          quality,
-          jpgBgColor,
-          scalePercent,
-          maxWidthPx
-        );
+        const result = prepared.width > 0
+          ? await convertSingleItem(
+              preparedItem,
+              preparedItem.targetFormat,
+              quality,
+              jpgBgColor,
+              scalePercent,
+              maxWidthPx
+            )
+          : {
+              targetFormat: preparedItem.targetFormat,
+              convertedBlob: null,
+              convertedUrl: null,
+              convertedSize: 0,
+              status: 'error' as const,
+              errorMessage: isHeicFormat(item.sourceFormat, file)
+                ? 'Berkas HEIC/HEIF gagal didekode oleh browser'
+                : 'Format gambar tidak dapat dibaca browser',
+            };
+
+        if (result.status === 'done') successCount += 1;
+
         setItems((prev) =>
           prev.map((cur) => {
             if (cur.id !== item.id) return cur;
+            if (cur.sourceUrl && cur.sourceUrl !== prepared.sourceUrl) {
+              URL.revokeObjectURL(cur.sourceUrl);
+            }
             if (cur.convertedUrl && cur.convertedUrl !== result.convertedUrl) {
               URL.revokeObjectURL(cur.convertedUrl);
             }
-            return { ...cur, ...result };
+            return {
+              ...cur,
+              sourceUrl: prepared.sourceUrl,
+              width: prepared.width,
+              height: prepared.height,
+              ...result,
+            };
           })
         );
       }
 
-      showToast(`${newItems.length} gambar berhasil dimuat & dikonversi`, 'success');
+      if (successCount > 0) {
+        showToast(`${successCount} gambar berhasil dimuat & dikonversi`, 'success');
+      }
     },
     [convertSingleItem, formatMode, jpgBgColor, maxWidthPx, quality, scalePercent, showToast]
   );
@@ -473,7 +561,7 @@ export const ImageConverterView: React.FC = () => {
             Image Format Converter
           </h2>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-            Ubah PNG ke JPG, JPG ke PNG, atau WebP secara instan di browser tanpa mengurangi privasi berkas Anda.
+            Ubah PNG ke JPG, JPG ke PNG, HEIC (iPhone) ke JPG/PNG, atau WebP secara instan di browser tanpa mengurangi privasi berkas Anda.
           </p>
         </div>
 
@@ -481,7 +569,7 @@ export const ImageConverterView: React.FC = () => {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.heic,.heif,image/heic,image/heif"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -555,7 +643,7 @@ export const ImageConverterView: React.FC = () => {
               ))}
             </div>
             <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-              {formatMode === 'auto_flip' && 'Otomatis mengubah berkas PNG menjadi JPG, dan JPG/WebP menjadi PNG.'}
+              {formatMode === 'auto_flip' && 'Otomatis mengubah berkas PNG & HEIC menjadi JPG, serta JPG/WebP menjadi PNG.'}
               {formatMode === 'jpg' && 'Semua gambar dikonversi menjadi JPG (.jpg) dengan ukuran ringkas.'}
               {formatMode === 'png' && 'Semua gambar dikonversi menjadi PNG (.png) lossless berkualitas tinggi.'}
               {formatMode === 'webp' && 'Semua gambar dikonversi menjadi WebP (.webp) modern yang sangat ringan.'}
@@ -681,14 +769,14 @@ export const ImageConverterView: React.FC = () => {
             Tarik & lepas gambar di sini, atau klik untuk memilih berkas
           </h3>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1.5 max-w-md mx-auto">
-            Mendukung banyak gambar sekaligus (batch) dalam format PNG, JPG, JPEG, WebP, BMP, GIF, dan SVG. Anda juga dapat langsung menekan Ctrl+V untuk menempel gambar.
+            Mendukung banyak gambar sekaligus (batch) dalam format PNG, JPG, JPEG, HEIC/HEIF (foto iPhone), WebP, BMP, GIF, dan SVG. Anda juga dapat langsung menekan Ctrl+V untuk menempel gambar.
           </p>
           <button
             type="button"
             className="mt-5 px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors inline-flex items-center gap-2"
           >
             <ImageIcon className="w-4 h-4" />
-            <span>Pilih Gambar (PNG / JPG / WebP)</span>
+            <span>Pilih Gambar (PNG / JPG / HEIC / WebP)</span>
           </button>
         </div>
       ) : (
@@ -783,11 +871,17 @@ export const ImageConverterView: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <img
-                        src={item.convertedUrl || item.sourceUrl}
-                        alt={item.fileName}
-                        className="w-12 h-12 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0 bg-neutral-100 dark:bg-neutral-800"
-                      />
+                      {(item.convertedUrl || (item.sourceUrl && item.width > 0)) ? (
+                        <img
+                          src={item.convertedUrl || item.sourceUrl}
+                          alt={item.fileName}
+                          className="w-12 h-12 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0 bg-neutral-100 dark:bg-neutral-800"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg border border-neutral-200 dark:border-neutral-700 shrink-0 bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center">
+                          <RefreshCw className="w-4 h-4 animate-spin text-indigo-500" />
+                        </div>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
@@ -900,11 +994,19 @@ export const ImageConverterView: React.FC = () => {
                   <div
                     className="rounded-lg border border-neutral-200 dark:border-neutral-800 overflow-hidden flex items-center justify-center max-h-56 min-h-32 bg-[repeating-conic-gradient(#e5e7eb_0%_25%,#f9fafb_0%_50%)] dark:bg-[repeating-conic-gradient(#262626_0%_25%,#171717_0%_50%)] bg-[length:16px_16px]"
                   >
-                    <img
-                      src={selectedItem.sourceUrl}
-                      alt={`Asli ${selectedItem.fileName}`}
-                      className="max-h-56 w-auto object-contain"
-                    />
+                    {selectedItem.sourceUrl && selectedItem.width > 0 ? (
+                      <img
+                        src={selectedItem.sourceUrl}
+                        alt={`Asli ${selectedItem.fileName}`}
+                        className="max-h-56 w-auto object-contain"
+                      />
+                    ) : selectedItem.status === 'error' ? (
+                      <span className="text-xs text-rose-600 dark:text-rose-400 px-4 text-center">
+                        {selectedItem.errorMessage || 'Pratinjau tidak tersedia'}
+                      </span>
+                    ) : (
+                      <RefreshCw className="w-5 h-5 animate-spin text-indigo-500" />
+                    )}
                   </div>
                 </div>
 
@@ -916,6 +1018,8 @@ export const ImageConverterView: React.FC = () => {
                     <span>
                       {selectedItem.status === 'done'
                         ? `${selectedItem.convertedWidth}×${selectedItem.convertedHeight} · ${formatBytes(selectedItem.convertedSize)}`
+                        : selectedItem.status === 'error'
+                        ? 'Gagal'
                         : 'Memproses...'}
                     </span>
                   </div>
@@ -928,6 +1032,10 @@ export const ImageConverterView: React.FC = () => {
                         alt={`Hasil ${selectedItem.baseName}.${EXT_BY_FORMAT[selectedItem.targetFormat]}`}
                         className="max-h-56 w-auto object-contain"
                       />
+                    ) : selectedItem.status === 'error' ? (
+                      <span className="text-xs text-rose-600 dark:text-rose-400 px-4 text-center">
+                        {selectedItem.errorMessage || 'Gagal mengonversi gambar'}
+                      </span>
                     ) : (
                       <RefreshCw className="w-5 h-5 animate-spin text-indigo-500" />
                     )}

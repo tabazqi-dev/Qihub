@@ -287,7 +287,7 @@ export const DashboardView: React.FC<DashboardViewProps> = () => {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">Image Converter</p>
-              <p className="text-[11px] text-neutral-500 truncate">PNG ⇄ JPG & WebP</p>
+              <p className="text-[11px] text-neutral-500 truncate">PNG ⇄ JPG, HEIC & WebP</p>
             </div>
           </button>
 

@@ -1,3 +1,5 @@
+import type { ClosedPeriodRecord } from '../types';
+
 export const DEFAULT_MONTHLY_CUTOFF_DAY = 26;
 
 const SHORT_MONTHS_ID = [
@@ -141,4 +143,39 @@ export function formatPeriodLabel(
     return safeCutoff <= 1 ? `${baseLabel} (Bulan Ini)` : `${baseLabel} (Periode Berjalan)`;
   }
   return baseLabel;
+}
+
+export function getPreviousPeriodKey(periodKey: string): string {
+  const parsed = parseYm(periodKey);
+  if (!parsed) return periodKey;
+  const prev = addMonthsToYm(parsed.year, parsed.month, -1);
+  return `${prev.year}-${String(prev.month).padStart(2, '0')}`;
+}
+
+export function getFiscalYearRange(yearKey: string): {
+  key: string;
+  startDate: string;
+  endDate: string;
+  label: string;
+} {
+  const cleanYear = /^\d{4}$/.test(yearKey.trim())
+    ? yearKey.trim()
+    : getLocalTodayYmd().slice(0, 4);
+  return {
+    key: cleanYear,
+    startDate: `${cleanYear}-01-01`,
+    endDate: `${cleanYear}-12-31`,
+    label: `Tahun Fiskal ${cleanYear} (1 Jan – 31 Des ${cleanYear})`,
+  };
+}
+
+export function findClosedPeriodForDate(
+  dateStr: string,
+  closedPeriods: ClosedPeriodRecord[]
+): ClosedPeriodRecord | undefined {
+  if (!dateStr || dateStr.length < 10 || !Array.isArray(closedPeriods) || closedPeriods.length === 0) {
+    return undefined;
+  }
+  const ymd = dateStr.slice(0, 10);
+  return closedPeriods.find((cp) => ymd >= cp.startDate && ymd <= cp.endDate);
 }

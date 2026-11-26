@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { app as apiApp } from './src/server/app.ts';
@@ -9,6 +10,7 @@ const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   const server = express();
+  const httpServer = http.createServer(server);
 
   // Mount shared Express API router (/api/*)
   server.use(apiApp);
@@ -16,7 +18,10 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ws: { server: httpServer },
+      },
       appType: 'spa',
     });
     server.use(vite.middlewares);
@@ -36,7 +41,7 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
